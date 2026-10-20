@@ -131,7 +131,7 @@ index 4da50d8..760ac75 100644
  	__atomic_store_n(&rh_lock, 0, __ATOMIC_RELEASE);
  	return error;
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 03defe6..0e0a36e 100644
+index 03defe6..7db6454 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -1,9 +1,12 @@
@@ -466,7 +466,7 @@ index 03defe6..0e0a36e 100644
  			(void)touch_goodix_ack();
  			return EIO;
  		}
-@@ -440,6 +676,83 @@ touch_goodix(void)
+@@ -440,9 +676,85 @@ touch_goodix(void)
  	return err;
  }
  
@@ -476,7 +476,6 @@ index 03defe6..0e0a36e 100644
 + * Touch events are retrieved from an 8-byte event FIFO using command 0x86 (FIFO_CMD_READALL).
 + * Event IDs:
 + *   0x00 = NO EVENT
-+ *   0x03 = CONTROLLER READY (re-arm active sensing)
 + *   0x13 = ENTER POINT (touch down)
 + *   0x23 = MOTION POINT (touch move)
 + *   0x33 = LEAVE POINT (touch release)
@@ -550,7 +549,10 @@ index 03defe6..0e0a36e 100644
 +#if defined(UMI)
 +	return touch_st_fts();
 +#else
-@@ -472,7 +783,7 @@ touch_focaltech(void)
+ 	uint8_t buf[63];
+ 	int x[TOUCH_MAX] = {0}, y[TOUCH_MAX] = {0};
+ 	uint32_t mask = 0, seen = 0;
+@@ -472,7 +784,7 @@ touch_focaltech(void)
  		}
  		unsigned px = ((unsigned)(p[0] & 15u) << 8) | p[1];
  		unsigned py = ((unsigned)(p[2] & 15u) << 8) | p[3];
@@ -559,7 +561,7 @@ index 03defe6..0e0a36e 100644
  			return EIO;
  		}
  		mask |= 1u << id;
-@@ -485,17 +796,63 @@ touch_focaltech(void)
+@@ -485,17 +797,63 @@ touch_focaltech(void)
  	}
  	touch_report(mask, x, y);
  	return 0;
@@ -625,7 +627,7 @@ index 03defe6..0e0a36e 100644
  	    ((tx >> 24) & 0x3fu) != 32u || ((rx >> 24) & 0x3fu) != 32u ||
  	    ((tx >> 16) & 0x3fu) < 2u || ((rx >> 16) & 0x3fu) < 2u) {
  		printf("SWEET TOUCH: need ABL-loaded I2C firmware and 32-bit FIFOs; probes skipped\n");
-@@ -551,6 +908,11 @@ touch_thread(void *arg, wait_result_t result)
+@@ -551,6 +909,11 @@ touch_thread(void *arg, wait_result_t result)
  	unsigned delay_s = 45;
  	(void)arg;
  	(void)result;
@@ -637,7 +639,7 @@ index 03defe6..0e0a36e 100644
  	/*
  	 * Start late (boot-arg sweettouchdelay, seconds): if the bus access
  	 * below hangs the SoC, the persistent log and the GUI got there first.
-@@ -558,36 +920,77 @@ touch_thread(void *arg, wait_result_t result)
+@@ -558,36 +921,77 @@ touch_thread(void *arg, wait_result_t result)
  	(void)PE_parse_boot_argn("sweettouchdelay", &delay_s, sizeof(delay_s));
  	printf("SWEET TOUCH: starting in %u s\n", delay_s);
  	touch_wait(delay_s * 1000u);
@@ -729,7 +731,7 @@ index 03defe6..0e0a36e 100644
  	touch_wait(300); /* exceeds vendor 5 ms test + 95 ms post-test wait */
  	uint8_t gid[32], legacy[32], fid1 = 0, fid2 = 0;
  	st.probing = true;
-@@ -595,3 +998,26 @@ touch_thread(void *arg, wait_result_t result)
+@@ -595,6 +999,29 @@ touch_thread(void *arg, wait_result_t result)
  	printf("SWEET TOUCH: probe 0x5d err=%d pid=%02x%02x%02x%02x fw=%02x.%02x.%02x.%02x irq=%#x\n",
  	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
  	(void)touch_probe_info(0x8240, legacy);
@@ -756,7 +758,10 @@ index 03defe6..0e0a36e 100644
 +	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && (gid[3] == '6' || gid[3] == '9');
 +	bool fts = !fe;
 +#else
-@@ -602,18 +1027,26 @@ touch_thread(void *arg, wait_result_t result)
+ 	int fe1 = touch_read(0x38, 0xa3, false, &fid1, 1);
+ 	int fe2 = touch_read(0x38, 0x9f, false, &fid2, 1);
+ 	printf("SWEET TOUCH: probe 0x38 err=%d/%d chip-id=%02x:%02x irq=%#x\n",
+@@ -602,18 +1029,26 @@ touch_thread(void *arg, wait_result_t result)
  	st.probing = false;
  	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
  	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
@@ -1207,7 +1212,7 @@ index aca295c..e46e633 100644
  SWEET_AES_INC = -I$(SWEET_AES_ROOT)/inc -I$(SWEET_AES_ROOT)/src
  sweet_aes.o_INCFLAGS = $(SWEET_AES_INC)
 diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
-index 9a748ea..9b76e8e 100644
+index 69b13f9..f3adcfc 100644
 --- a/makedefs/MakeInc.def
 +++ b/makedefs/MakeInc.def
 @@ -29,7 +29,7 @@ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
@@ -1288,7 +1293,7 @@ index c7d274f..d9c8153 100644
  # Headers installed into System.framework/PrivateHeaders (userspace internal SDK only).
 diff --git a/pexpert/pexpert/arm64/UMI.h b/pexpert/pexpert/arm64/UMI.h
 new file mode 100644
-index 0000000..c3201ea
+index 0000000..d4ab22e
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/UMI.h
 @@ -0,0 +1,86 @@
