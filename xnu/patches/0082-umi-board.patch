@@ -647,6 +647,37 @@ index 92f3e26..7767ec4 100644
      "     'IOProbeScore'    = 10000:32;"
      "   },"
      "   {"
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+index e6c74aa..af6fc40 100644
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -767,6 +767,26 @@ IOFindBSDRoot( char * rootName, unsigned int rootNameSize,
+ 	}
+ 
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
++	/*
++	 * sweetbringup=2: start the input and USB drivers even when no root
++	 * device is requested. Used to validate UMI touch/USB (and the live
++	 * log channel) before an iOS root image exists.
++	 */
++	{
++		static bool bringup_done = false;
++		uint32_t bringup = 0;
++		PE_parse_boot_argn("sweetbringup", &bringup, sizeof(bringup));
++		if (bringup >= 2 && !bringup_done) {
++			extern void sweet_keys_init(void);
++			extern void sweet_touch_init(void);
++			extern void sweet_usb_probe(void);
++			bringup_done = true;
++			sweet_keys_init();
++			sweet_touch_init();
++			sweet_usb_probe();
++		}
++	}
++
+ //
+ //	SWEET: root on a GPT partition of the internal UFS (bsd/dev/sweet_ufs.c)
+ //
 diff --git a/libkern/conf/Makefile.template b/libkern/conf/Makefile.template
 index aca295c..e46e633 100644
 --- a/libkern/conf/Makefile.template
