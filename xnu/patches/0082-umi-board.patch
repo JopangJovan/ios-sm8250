@@ -90,8 +90,37 @@ index a148608..0dcf8f9 100644
  		keys_gpio_apid = KEYS_NO_APID;
  	}
  	if (!pok && !gok) {
+diff --git a/bsd/dev/sweet_rpmh.c b/bsd/dev/sweet_rpmh.c
+index 4da50d8..d68b9dc 100644
+--- a/bsd/dev/sweet_rpmh.c
++++ b/bsd/dev/sweet_rpmh.c
+@@ -320,7 +320,7 @@ rh_send(uint32_t address, unsigned mv)
+ 		return EIO;
+ 	}
+ 	rh_poisoned = false;
+-	printf("SWEET RPMH: L11C ACTIVE vote complete (rail voltage requires hardware verification)\n");
++	printf("SWEET RPMH: %s ACTIVE vote complete at %u mV\n", res, mv);
+ 	return 0;
+ }
+ 
+@@ -328,8 +328,13 @@ int
+ sweet_rpmh_vreg_enable(const char *res, unsigned mv)
+ {
+ 	/* Board-specific helper: do not apply PMIC5-LDO policy to arbitrary resources. */
+-	if (!res || strcmp(res, "ldoc11") || mv < 2950 || mv > 3400) {
+-		printf("SWEET RPMH: expected ldoc11 and 2950..3400 mV\n");
++	if (!res || (strcmp(res, "ldoc11") && strcmp(res, "ldoc1"))) {
++		printf("SWEET RPMH: expected ldoc11 or ldoc1\n");
++		return EINVAL;
++	}
++	if ((strcmp(res, "ldoc11") == 0 && (mv < 2950 || mv > 3400)) ||
++	    (strcmp(res, "ldoc1") == 0 && (mv < 1700 || mv > 2000))) {
++		printf("SWEET RPMH: %s voltage %u mV out of range\n", res, mv);
+ 		return EINVAL;
+ 	}
+ 	if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) {
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 03defe6..c7ba4bd 100644
+index 03defe6..e87516c 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -1,9 +1,12 @@
@@ -515,7 +544,7 @@ index 03defe6..c7ba4bd 100644
  	/*
  	 * Start late (boot-arg sweettouchdelay, seconds): if the bus access
  	 * below hangs the SoC, the persistent log and the GUI got there first.
-@@ -558,36 +844,70 @@ touch_thread(void *arg, wait_result_t result)
+@@ -558,36 +844,77 @@ touch_thread(void *arg, wait_result_t result)
  	(void)PE_parse_boot_argn("sweettouchdelay", &delay_s, sizeof(delay_s));
  	printf("SWEET TOUCH: starting in %u s\n", delay_s);
  	touch_wait(delay_s * 1000u);
@@ -549,15 +578,15 @@ index 03defe6..c7ba4bd 100644
 +	}
 +#else
 +	if (!touch_clocks()) {
++		goto out;
++	}
++	printf("SWEET TOUCH: clocks ready; reading SE13 registers\n");
++	if (!touch_se_init()) {
  		goto out;
  	}
 -	printf("SWEET TOUCH: TLMM reset=%#x irq=%#x vdd90=%#x; voting L11C through RPMh\n",
 -	    touch_rd(st.gpio, TOUCH_GPIO_IO(8)), touch_rd(st.gpio, TOUCH_GPIO_IO(9)),
 -	    touch_rd(st.gpio, TOUCH_GPIO_IO(90)));
-+	printf("SWEET TOUCH: clocks ready; reading SE13 registers\n");
-+	if (!touch_se_init()) {
-+		goto out;
-+	}
 +#endif
 +	printf("SWEET TOUCH: TLMM reset=%#x irq=%#x power=%#x\n",
 +	    touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_RESET)),
@@ -569,9 +598,16 @@ index 03defe6..c7ba4bd 100644
 +	touch_gpio(TOUCH_GPIO_IRQ, 0, 3, 3, false, false); /* IRQ input, 8 mA, pull-up */
 +	touch_gpio(TOUCH_GPIO_RESET, 0, 3, 3, true, false);
 +#if defined(UMI)
-+	/* PM8150A L1 (1.8 V) is left on by firmware; 3.3 V is a TLMM switch. */
-+	printf("SWEET TOUCH: PM8150A L1 assumed on; enabling TLMM GPIO%d\n",
-+	    TOUCH_GPIO_POWER);
++	/*
++	 * PM8150A L1 (vdd, 1.8 V) powers the touch I/O and the I2C
++	 * pull-ups.  Without the RPMh vote the bus stays low and every
++	 * read returns zero even though the pads are driven correctly.
++	 */
++	int vdd_error = sweet_rpmh_vreg_enable("ldoc1", 1800);
++	if (vdd_error) {
++		printf("SWEET TOUCH: ldoc1 vote failed %d; continuing\n", vdd_error);
++	}
++	printf("SWEET TOUCH: enabling TLMM GPIO%d (avdd)\n", TOUCH_GPIO_POWER);
 +#else
  	int power_error = sweet_rpmh_vreg_enable("ldoc11", 3200);
  	if (power_error) {
@@ -600,7 +636,7 @@ index 03defe6..c7ba4bd 100644
  	touch_wait(300); /* exceeds vendor 5 ms test + 95 ms post-test wait */
  	uint8_t gid[32], legacy[32], fid1 = 0, fid2 = 0;
  	st.probing = true;
-@@ -595,10 +915,10 @@ touch_thread(void *arg, wait_result_t result)
+@@ -595,10 +922,10 @@ touch_thread(void *arg, wait_result_t result)
  	printf("SWEET TOUCH: probe 0x5d err=%d pid=%02x%02x%02x%02x fw=%02x.%02x.%02x.%02x irq=%#x\n",
  	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
  	(void)touch_probe_info(0x8240, legacy);
@@ -615,7 +651,7 @@ index 03defe6..c7ba4bd 100644
  	st.probing = false;
  	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
  	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
-@@ -608,12 +928,13 @@ touch_thread(void *arg, wait_result_t result)
+@@ -608,12 +935,13 @@ touch_thread(void *arg, wait_result_t result)
  		goto out;
  	}
  	st.kind = goodix ? TOUCH_GOODIX : TOUCH_FTS;
