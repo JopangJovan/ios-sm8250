@@ -131,7 +131,7 @@ index 4da50d8..760ac75 100644
  	__atomic_store_n(&rh_lock, 0, __ATOMIC_RELEASE);
  	return error;
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 03defe6..7db6454 100644
+index 03defe6..2d74a77 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -1,9 +1,12 @@
@@ -222,7 +222,7 @@ index 03defe6..7db6454 100644
  	int kind, irq_hint;
  	uint32_t irq_status, irq_last, active;
  	unsigned sent, got;
-@@ -133,16 +171,203 @@ touch_gpio(unsigned pin, unsigned mux, unsigned pull, unsigned drive, bool out,
+@@ -133,16 +171,213 @@ touch_gpio(unsigned pin, unsigned mux, unsigned pull, unsigned drive, bool out,
  	touch_wr(st.gpio, off, cfg);
  }
  
@@ -256,6 +256,16 @@ index 03defe6..7db6454 100644
 +touch_bb_scl(bool low)
 +{
 +	touch_gpio(TOUCH_GPIO_SCL, 0, 3, 2, low, false);
++	if (!low) {
++		uint64_t start, now, timeout;
++		__asm__ volatile("mrs %0, cntvct_el0" : "=r"(start));
++		timeout = touch_bb_freq / 1000u;
++		while (!(touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_SCL)) & 1u)) {
++			__asm__ volatile("mrs %0, cntvct_el0" : "=r"(now));
++			if (now - start > timeout)
++				break;
++		}
++	}
 +}
 +
 +static bool
@@ -330,7 +340,7 @@ index 03defe6..7db6454 100644
 +		touch_bb_scl(true);
 +		touch_bb_delay();
 +	}
-+	touch_bb_sda(!ack);
++	touch_bb_sda(ack);
 +	touch_bb_delay();
 +	touch_bb_scl(false);
 +	touch_bb_delay();
@@ -428,7 +438,7 @@ index 03defe6..7db6454 100644
  	if (dfs & 1u) {
  		/* SE CLK_SEL=0 selects DFS performance level 0. Do not alter tables. */
  		cfg = touch_rd(st.gcc, TOUCH_RCG + 0x1cu);
-@@ -160,7 +385,17 @@ touch_clocks(void)
+@@ -160,7 +395,17 @@ touch_clocks(void)
  			return false;
  		}
  	}
@@ -447,7 +457,7 @@ index 03defe6..7db6454 100644
  	for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); ++i) {
  		if (!touch_wait_clear(st.gcc, branches[i], 1u << 31)) {
  			printf("SWEET TOUCH: GCC branch %#x halted (%#x)\n", branches[i],
-@@ -294,7 +529,8 @@ touch_msg(uint8_t addr, const uint8_t *tx, unsigned nt, uint8_t *rx,
+@@ -294,7 +539,8 @@ touch_msg(uint8_t addr, const uint8_t *tx, unsigned nt, uint8_t *rx,
  {
  	st.irq_status = st.irq_last = 0;
  	st.sent = st.got = 0;
@@ -457,7 +467,7 @@ index 03defe6..7db6454 100644
  	if (st.probing) {
  		printf("SWEET TOUCH: probe xfer addr=%#x %s len=%u stretch=%u err=%d irq=%#x seen=%#x tx=%u rx=%u status=%#x\n",
  		    addr, nr ? "read" : "write", nr ? nr : nt, stretch ? 1u : 0u,
-@@ -425,7 +661,7 @@ touch_goodix(void)
+@@ -425,7 +671,7 @@ touch_goodix(void)
  		unsigned px = touch_be16(p + 2), py = touch_be16(p + 4);
  		/* Low nibble 1/3 denotes pen data in the vendor parser. */
  		if ((p[0] & 15u) == 1u || (p[0] & 15u) == 3u || id >= TOUCH_MAX ||
@@ -466,7 +476,7 @@ index 03defe6..7db6454 100644
  			(void)touch_goodix_ack();
  			return EIO;
  		}
-@@ -440,9 +676,85 @@ touch_goodix(void)
+@@ -440,9 +686,85 @@ touch_goodix(void)
  	return err;
  }
  
@@ -552,7 +562,7 @@ index 03defe6..7db6454 100644
  	uint8_t buf[63];
  	int x[TOUCH_MAX] = {0}, y[TOUCH_MAX] = {0};
  	uint32_t mask = 0, seen = 0;
-@@ -472,7 +784,7 @@ touch_focaltech(void)
+@@ -472,7 +794,7 @@ touch_focaltech(void)
  		}
  		unsigned px = ((unsigned)(p[0] & 15u) << 8) | p[1];
  		unsigned py = ((unsigned)(p[2] & 15u) << 8) | p[3];
@@ -561,7 +571,7 @@ index 03defe6..7db6454 100644
  			return EIO;
  		}
  		mask |= 1u << id;
-@@ -485,17 +797,63 @@ touch_focaltech(void)
+@@ -485,17 +807,63 @@ touch_focaltech(void)
  	}
  	touch_report(mask, x, y);
  	return 0;
@@ -627,7 +637,7 @@ index 03defe6..7db6454 100644
  	    ((tx >> 24) & 0x3fu) != 32u || ((rx >> 24) & 0x3fu) != 32u ||
  	    ((tx >> 16) & 0x3fu) < 2u || ((rx >> 16) & 0x3fu) < 2u) {
  		printf("SWEET TOUCH: need ABL-loaded I2C firmware and 32-bit FIFOs; probes skipped\n");
-@@ -551,6 +909,11 @@ touch_thread(void *arg, wait_result_t result)
+@@ -551,6 +919,11 @@ touch_thread(void *arg, wait_result_t result)
  	unsigned delay_s = 45;
  	(void)arg;
  	(void)result;
@@ -639,7 +649,7 @@ index 03defe6..7db6454 100644
  	/*
  	 * Start late (boot-arg sweettouchdelay, seconds): if the bus access
  	 * below hangs the SoC, the persistent log and the GUI got there first.
-@@ -558,36 +921,77 @@ touch_thread(void *arg, wait_result_t result)
+@@ -558,36 +931,77 @@ touch_thread(void *arg, wait_result_t result)
  	(void)PE_parse_boot_argn("sweettouchdelay", &delay_s, sizeof(delay_s));
  	printf("SWEET TOUCH: starting in %u s\n", delay_s);
  	touch_wait(delay_s * 1000u);
@@ -731,7 +741,7 @@ index 03defe6..7db6454 100644
  	touch_wait(300); /* exceeds vendor 5 ms test + 95 ms post-test wait */
  	uint8_t gid[32], legacy[32], fid1 = 0, fid2 = 0;
  	st.probing = true;
-@@ -595,6 +999,29 @@ touch_thread(void *arg, wait_result_t result)
+@@ -595,6 +1009,29 @@ touch_thread(void *arg, wait_result_t result)
  	printf("SWEET TOUCH: probe 0x5d err=%d pid=%02x%02x%02x%02x fw=%02x.%02x.%02x.%02x irq=%#x\n",
  	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
  	(void)touch_probe_info(0x8240, legacy);
@@ -761,7 +771,7 @@ index 03defe6..7db6454 100644
  	int fe1 = touch_read(0x38, 0xa3, false, &fid1, 1);
  	int fe2 = touch_read(0x38, 0x9f, false, &fid2, 1);
  	printf("SWEET TOUCH: probe 0x38 err=%d/%d chip-id=%02x:%02x irq=%#x\n",
-@@ -602,18 +1029,26 @@ touch_thread(void *arg, wait_result_t result)
+@@ -602,18 +1039,26 @@ touch_thread(void *arg, wait_result_t result)
  	st.probing = false;
  	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
  	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
