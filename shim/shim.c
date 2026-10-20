@@ -3,7 +3,8 @@
  *   - CPU feature registers (16K granule, GIC sysreg interface)
  *   - PSCI/SMCCC version and which PSCI calls the Qualcomm TZ offers
  *   - SMP: PSCI CPU_ON for the 7 secondaries, each reports its MPIDR
- *   - GICv3 Group 1 IRQ from the virtual timer (INTID 19 on Qualcomm)
+ *   - GICv3 Group 1 IRQ from the virtual timer (INTID 19 on sweet/SM7150,
+ *     27 on umi/SM8250)
  * Any unexpected exception paints a blue panic screen.
  */
 #include <stdint.h>
@@ -30,8 +31,13 @@
 #define GICR_ISPENDR0		(GICR_SGI + 0x200)
 #define GICR_ISACTIVER0		(GICR_SGI + 0x300)
 #define GICR_ICFGR1		(GICR_SGI + 0xc04)
+#if defined(BOARD_UMI)
+#define VTIMER_INTID		27	/* DT: <GIC_PPI 11 ...>, SM8250 */
+#define PTIMER_INTID		30	/* DT: <GIC_PPI 14 ...> */
+#else
 #define VTIMER_INTID		19	/* DT: <GIC_PPI 3 ...>, not the usual 27 */
 #define PTIMER_INTID		18	/* DT: <GIC_PPI 2 ...> */
+#endif
 #define SGI_INTID		1
 
 #define PSCI_VERSION		0x84000000UL

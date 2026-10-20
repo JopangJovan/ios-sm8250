@@ -3,7 +3,11 @@
 
 #define FB_BASE		0x9c000000UL	/* reserved-memory cont_splash_region */
 #define FB_W		1080
+#if defined(BOARD_UMI)
+#define FB_H		2340
+#else
 #define FB_H		2400
+#endif
 #define FB_STRIDE	(FB_W * 4)	/* a8r8g8b8, matches mainline simplefb */
 
 #define RED	0xffff0000U
