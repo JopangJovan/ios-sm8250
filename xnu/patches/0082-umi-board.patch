@@ -91,7 +91,7 @@ index a148608..0dcf8f9 100644
  	}
  	if (!pok && !gok) {
 diff --git a/bsd/dev/sweet_rpmh.c b/bsd/dev/sweet_rpmh.c
-index 4da50d8..d68b9dc 100644
+index 4da50d8..760ac75 100644
 --- a/bsd/dev/sweet_rpmh.c
 +++ b/bsd/dev/sweet_rpmh.c
 @@ -320,7 +320,7 @@ rh_send(uint32_t address, unsigned mv)
@@ -99,7 +99,7 @@ index 4da50d8..d68b9dc 100644
  	}
  	rh_poisoned = false;
 -	printf("SWEET RPMH: L11C ACTIVE vote complete (rail voltage requires hardware verification)\n");
-+	printf("SWEET RPMH: %s ACTIVE vote complete at %u mV\n", res, mv);
++	printf("SWEET RPMH: ACTIVE vote complete at %u mV (addr %#x)\n", mv, address);
  	return 0;
  }
  
@@ -119,6 +119,17 @@ index 4da50d8..d68b9dc 100644
  		return EINVAL;
  	}
  	if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) {
+@@ -350,7 +355,9 @@ sweet_rpmh_vreg_enable(const char *res, unsigned mv)
+ 	}
+ out:
+ 	if (error) {
+-		printf("SWEET RPMH: enable failed errno=%d\n", error);
++		printf("SWEET RPMH: enable %s failed errno=%d\n", res, error);
++	} else {
++		printf("SWEET RPMH: %s enabled at %u mV\n", res, mv);
+ 	}
+ 	__atomic_store_n(&rh_lock, 0, __ATOMIC_RELEASE);
+ 	return error;
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
 index 03defe6..e87516c 100644
 --- a/bsd/dev/sweet_touch.c
