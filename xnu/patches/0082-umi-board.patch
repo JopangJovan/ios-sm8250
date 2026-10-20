@@ -91,7 +91,7 @@ index a148608..0dcf8f9 100644
  	}
  	if (!pok && !gok) {
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 03defe6..d0ed85d 100644
+index 03defe6..c90f077 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -1,9 +1,12 @@
@@ -227,7 +227,28 @@ index 03defe6..d0ed85d 100644
  			return EIO;
  		}
  		mask |= 1u << id;
-@@ -558,9 +605,9 @@ touch_thread(void *arg, wait_result_t result)
+@@ -492,6 +539,20 @@ touch_se_init(void)
+ {
+ 	uint32_t fw = touch_rd(st.se, SE_FW);
+ 	uint32_t tx = touch_rd(st.se, SE_HW_TX), rx = touch_rd(st.se, SE_HW_RX);
++	uint32_t fifo_if = touch_rd(st.se, 0x2008);
++	if (touch_rd(st.se, 0x64) & 1u) {
++		/*
++		 * UMI's ABL leaves SE13 in GSI/DMA mode, so the FIFO interface
++		 * is disabled (GENI_IF_DISABLE_RO.FIFO_IF_DISABLE). Linux
++		 * switches an SE to FIFO mode by clearing SE_FIFO_IF_DISABLE
++		 * (0x2008 bit 0) and GENI_DMA_MODE_EN. Do that before probing;
++		 * sweet's ABL already leaves the FIFO interface enabled.
++		 */
++		touch_wr(st.se, SE_DMA, 0);
++		touch_wr(st.se, 0x2008, fifo_if & ~1u);
++		printf("SWEET TOUCH: FIFO disabled by firmware (0x2008=%#x); enabled -> 0x2008=%#x 0x64=%#x\n",
++		    fifo_if, touch_rd(st.se, 0x2008), touch_rd(st.se, 0x64));
++	}
+ 	printf("SWEET TOUCH: se7 fw=%#x proto=%u status=%#x tx=%#x rx=%#x ios=%#x\n",
+ 	    fw, (fw >> 8) & 0xffu, touch_rd(st.se, SE_STATUS), tx, rx,
+ 	    touch_rd(st.se, 0x908));
+@@ -558,9 +619,9 @@ touch_thread(void *arg, wait_result_t result)
  	(void)PE_parse_boot_argn("sweettouchdelay", &delay_s, sizeof(delay_s));
  	printf("SWEET TOUCH: starting in %u s\n", delay_s);
  	touch_wait(delay_s * 1000u);
@@ -239,7 +260,7 @@ index 03defe6..d0ed85d 100644
  	st.se = ml_io_map(TOUCH_SE_PA, 0x4000);
  	if (!st.gcc || !st.gpio || !st.se) {
  		printf("SWEET TOUCH: MMIO mapping failed\n");
-@@ -569,25 +616,32 @@ touch_thread(void *arg, wait_result_t result)
+@@ -569,25 +630,32 @@ touch_thread(void *arg, wait_result_t result)
  	if (!touch_clocks() || !touch_se_init()) {
  		goto out;
  	}
@@ -283,7 +304,7 @@ index 03defe6..d0ed85d 100644
  	touch_wait(300); /* exceeds vendor 5 ms test + 95 ms post-test wait */
  	uint8_t gid[32], legacy[32], fid1 = 0, fid2 = 0;
  	st.probing = true;
-@@ -595,10 +649,10 @@ touch_thread(void *arg, wait_result_t result)
+@@ -595,10 +663,10 @@ touch_thread(void *arg, wait_result_t result)
  	printf("SWEET TOUCH: probe 0x5d err=%d pid=%02x%02x%02x%02x fw=%02x.%02x.%02x.%02x irq=%#x\n",
  	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
  	(void)touch_probe_info(0x8240, legacy);
@@ -298,7 +319,7 @@ index 03defe6..d0ed85d 100644
  	st.probing = false;
  	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
  	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
-@@ -608,12 +662,13 @@ touch_thread(void *arg, wait_result_t result)
+@@ -608,12 +676,13 @@ touch_thread(void *arg, wait_result_t result)
  		goto out;
  	}
  	st.kind = goodix ? TOUCH_GOODIX : TOUCH_FTS;
