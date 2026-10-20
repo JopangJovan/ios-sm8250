@@ -50,7 +50,7 @@ The Mi 10 port is a **separate XNU machine config**, `UMI`, in patch `0082`. It 
 | SoC / CPU | Kryo 470: 6× A55 + 2× A76 | Kryo 585: 4× A55 + 3× A77 + 1× A77 prime, MPIDR `0x0`–`0x700` |
 | Timer PPI | Qualcomm numbering, virtual timer INTID 19 | ARM numbering, virtual timer INTID 27 |
 | Panel / splash | 1080×2400 at `0x9c000000`, region `0x1700000` | 1080×2340 at `0x9c000000`, region `0x2300000` |
-| Touch | Goodix GT9896 or FocalTech at SE7 (`0xa84000`) | FocalTech FTS at `0x49`, SE13 (`0xa94000`), TLMM `0x0f000000` |
+| Touch | Goodix GT9896 or FocalTech at SE7 (`0xa84000`) | STMicroelectronics FTS at `0x49`, SE13 (`0xa94000`), TLMM SOUTH `0x0f500000` |
 | Touch GPIOs | SDA/SCL 6/7, reset 8, IRQ 9, power 90 | SDA/SCL 36/37, reset 38, IRQ 39, power 69 |
 | Buttons | PON SID 0; volume-up PM6150L SID 4 GPIO2 | PON SID 0; volume-up PM8150 SID 0 GPIO6 |
 | UFS | `0x1d84000`, polled | same host, polled |
@@ -252,7 +252,7 @@ Not in git: partition backups, live device trees, recovery images, Apple firmwar
 - `sweet` touch: Goodix GT9896 at I²C `0x5d` on QUP SE7 (`0xa84000`), powered by PM6150L LDO11 through RPMh.
 - `sweet` buttons: power and volume down on the PM6150 PON block, volume up on PM6150L GPIO2 (SPMI SID 4).
 - `umi` panel: 1080×2340, continuous splash at `0x9c000000` (region `0x2300000`), still presented as iPhone X 1125×2436.
-- `umi` touch: FocalTech FTS at I²C `0x49` on QUPv3 SE13 (`0xa94000`), TLMM `0x0f000000`, GPIOs 36/37/38/39, 3.3 V enable 69. Goodix GT9889 at `0x5d` on the same bus is a follow-up.
+- `umi` touch: STMicroelectronics FTS at I²C `0x49` on QUPv3 SE13 (`0xa94000`), TLMM SOUTH `0x0f500000`, GPIOs 36/37/38/39, 3.3 V enable 69. Goodix GT9889 at `0x5d` on the same bus is an alternate.
 - `umi` buttons: power/volume-down on PM8150 PON SID 0 (PPID `0x008`), volume-up on PM8150 GPIO6 (PPID `0x0c5`).
 - `umi` CPU: Kryo 585, MPIDRs `0x0`–`0x700`; the ADT exports all eight as one cluster. Start with `cpus=1`, then `cpus=4` (A55) or `cpus=8`.
 

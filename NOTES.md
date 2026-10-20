@@ -2,6 +2,12 @@
 
 ## Agent handoff / active work (2026-10-20, Xiaomi Mi 10 `umi` port)
 
+### >>> UPDATE 2026-10-20 (Touch Screen Root Cause & Fix) <<<
+
+**TOUCHSCREEN ROOT CAUSE & FIX:**
+1. **TLMM Base Address:** SM8250 TLMM has a tiled register layout: WEST (`0x0f100000`), SOUTH (`0x0f500000`), NORTH (`0x0f900000`). Touch pins (SDA 36, SCL 37, reset 38, IRQ 39, AVDD enable 69) all reside in the SOUTH tile. In `0082-umi-board.patch`, `UMI_TOUCH_GPIO_PHYS` was set to `0x0f000000` (reserved region below WEST tile). Consequently, all GPIO reads returned 0x0, bit-bang SDA read was always 0 (causing fake ACKs on every address and 0x00 on all data bytes), and GPIO 69 (3.3V power) and GPIO 38 (reset) were never driven. Fixed `UMI_TOUCH_GPIO_PHYS` to `0x0f500000`.
+2. **Controller IC Protocol:** The touch controller on Mi 10 is STMicroelectronics FingerTipS (FTS521) at `0x49` (`st,fts` in DTS), NOT FocalTech FT5452. It does not use FocalTech's register 0 (63-byte packet) or registers 0xa3/0x9f. Instead, it uses an 8-byte event FIFO accessed via command `0x86` (`FIFO_CMD_READALL`), reporting `0x13` (Enter), `0x23` (Motion), and `0x33` (Leave) events with 12-bit X/Y coordinates. Added `touch_st_fts()` for UMI and updated probe logic to read FIFO after reset and active scan enable (`0xA0 0x00 0x01`).
+
 ### >>> UPDATE 2026-10-20 (read first; `sweet` history below is unchanged) <<<
 
 **GOAL:** port the working iOS 16.7 `sweet` bring-up to the Xiaomi Mi 10 (`umi`, SM8250 / Snapdragon 865), keeping iPhone X (`iPhone10,3` / D22AP) identity and userland, and preserving all `sweet` support.
