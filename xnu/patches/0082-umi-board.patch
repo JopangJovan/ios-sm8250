@@ -1,0 +1,799 @@
+diff --git a/bsd/conf/Makefile.template b/bsd/conf/Makefile.template
+index f2d8bf8..5e8fce9 100644
+--- a/bsd/conf/Makefile.template
++++ b/bsd/conf/Makefile.template
+@@ -44,8 +44,8 @@ CFLAGS+= -include meta_features.h -DDRIVER_PRIVATE \
+         -Warray-bounds-pointer-arithmetic
+ SFLAGS+= -include meta_features.h
+ 
+-# This provider is built into SWEET; other boards use their normal kext.
+-ifeq ($(CURRENT_MACHINE_CONFIG),SWEET)
++# This provider is built into SWEET and UMI; other boards use their normal kext.
++ifeq ($(filter $(CURRENT_MACHINE_CONFIG),SWEET UMI),$(CURRENT_MACHINE_CONFIG))
+ SWEET_PTHREAD_ROOT = $(SRCROOT)/bsd/pthread/sweet_libpthread
+ SWEET_PTHREAD_INC = -I$(SWEET_PTHREAD_ROOT) -I$(SWEET_PTHREAD_ROOT)/private -I$(SWEET_PTHREAD_ROOT)/include
+ sweet_pthread_init.o_INCFLAGS = $(SWEET_PTHREAD_INC)
+diff --git a/bsd/dev/sweet_keys.c b/bsd/dev/sweet_keys.c
+index a148608..0dcf8f9 100644
+--- a/bsd/dev/sweet_keys.c
++++ b/bsd/dev/sweet_keys.c
+@@ -1,6 +1,7 @@
+ /*
+- * Minimal polled SWEET keys. Call once after the scheduler is running.
+- * See hw-report.md: volume-up is PM6150L SID 4, NOT PM6150 SID 0.
++ * Minimal polled SWEET/UMI keys. Call once after the scheduler is running.
++ * sweet: volume-up is PM6150L SID 4 GPIO2, not PM6150 SID 0.
++ * umi:   volume-up is PM8150 SID 0 GPIO6.
+  * PMIC access is READ ONLY: the sole MMIO write issues EXT_READL on an
+  * observer channel. No PMIC config, IRQ acknowledge or reset writes exist.
+  */
+@@ -12,6 +13,9 @@
+ #include <kern/sched_prim.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++#if defined(ARM64_BOARD_CONFIG_UMI)
++#include <pexpert/arm64/UMI.h>
++#endif
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ extern void sweet_hid_key(int key, int down);
+@@ -23,6 +27,15 @@ void sweet_keys_init(void);
+ #define KEYS_PON_RT      0x0810u
+ #define KEYS_GPIO_RT     0xc110u
+ #define KEYS_NO_APID     0xffffu
++#if defined(UMI)
++#define KEYS_PON_PPID    UMI_KEYS_PON_PPID
++#define KEYS_GPIO_PPID   UMI_KEYS_GPIO_PPID
++#define KEYS_GPIO_NAME   "GPIO6"
++#else
++#define KEYS_PON_PPID    0x0008u
++#define KEYS_GPIO_PPID   0x4c1u
++#define KEYS_GPIO_NAME   "GPIO2"
++#endif
+ 
+ static vm_offset_t keys_core, keys_obs, keys_cnfg;
+ static uint16_t keys_pon_apid = KEYS_NO_APID, keys_gpio_apid = KEYS_NO_APID;
+@@ -113,7 +126,7 @@ keys_thread(void *arg, wait_result_t result)
+ 		for (int k = 0; k < 3; ++k) {
+ 			if ((k == 1 ? gok : pok) && now[k] != state[k]) {
+ 				state[k] = now[k];
+-				printf("SWEET KEYS: key=%d down=%d pon=%#x gpio4:c110=%#x\n",
++				printf("SWEET KEYS: key=%d down=%d pon=%#x gpio-status=%#x\n",
+ 				    k, state[k], pon, gpio);
+ 				sweet_hid_key(k, state[k]);
+ 			}
+@@ -151,22 +164,23 @@ sweet_keys_init(void)
+ 		    keys_version, count);
+ 		return;
+ 	}
+-	keys_pon_apid = keys_find_apid(0x008, count);
+-	keys_gpio_apid = keys_find_apid(0x4c1, count);
++	keys_pon_apid = keys_find_apid(KEYS_PON_PPID, count);
++	keys_gpio_apid = keys_find_apid(KEYS_GPIO_PPID, count);
+ 	uint8_t pon = 0, gpio = 0, mode = 0, en = 0, subtype = 0;
+ 	bool pok = keys_read(keys_pon_apid, KEYS_PON_RT, &pon);
+ 	bool gok = keys_read(keys_gpio_apid, KEYS_GPIO_RT, &gpio);
+ 	bool mok = keys_read(keys_gpio_apid, 0xc140, &mode);
+ 	bool eok = keys_read(keys_gpio_apid, 0xc146, &en);
+ 	bool sok = keys_read(keys_gpio_apid, 0xc105, &subtype);
+-	printf("SWEET KEYS: arb=%#x apids=%u pon-apid=%u gpio4-apid=%u pon=%#x/%d gpio=%#x/%d mode=%#x/%d en=%#x/%d subtype=%#x/%d\n",
++	printf("SWEET KEYS: arb=%#x apids=%u pon-apid=%u gpio-apid=%u pon=%#x/%d gpio=%#x/%d mode=%#x/%d en=%#x/%d subtype=%#x/%d\n",
+ 	    keys_version, count, keys_pon_apid, keys_gpio_apid,
+ 	    pon, pok, gpio, gok, mode, mok, en, eok, subtype, sok);
+ 	/* GPIO configuration belongs to firmware. Diagnose, never repair it here. */
+ 	unsigned dir = subtype >= 0x10u && subtype <= 0x13u ?
+ 	    mode & 3u : (mode >> 4) & 7u;
+ 	if (!eok || !mok || !sok || !(en & 0x80u) || (dir != 0 && dir != 2)) {
+-		printf("SWEET KEYS: GPIO2 not confirmed enabled as input; volume-up withheld, PMIC unchanged\n");
++		printf("SWEET KEYS: %s not confirmed enabled as input; volume-up withheld, PMIC unchanged\n",
++		    KEYS_GPIO_NAME);
+ 		keys_gpio_apid = KEYS_NO_APID;
+ 	}
+ 	if (!pok && !gok) {
+diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
+index 03defe6..e37dbb7 100644
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -1,9 +1,12 @@
+ /*
+- * SWEET SE7 FIFO I2C / GT9896 Yellowstone / Focaltech 54:52 bring-up.
++ * SWEET/UMI FIFO I2C touch bring-up.
++ * sweet: SE7, Goodix GT9896 Yellowstone or FocalTech 54:52.
++ * umi:   QUPv3 SE13, FocalTech FTS at 0x49 (Goodix GT9889 is a follow-up).
+  * Call once after the scheduler is running; all work runs on one thread.
+- * Requires ABL-loaded GENI I2C firmware; votes L11C through sweet_rpmh.c.
++ * Requires ABL-loaded GENI I2C firmware. sweet votes L11C through
++ * sweet_rpmh.c; umi relies on the always-on PM8150A L1 rail.
+  * No firmware/config upload or direct PMIC writes. Only IC data write:
+- * zero to GT9896's event status after reading a report. See touch2/report.md.
++ * zero to GT9896's event status after reading a report.
+  */
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ #include <sys/param.h>
+@@ -14,6 +17,9 @@
+ #include <kern/sched_prim.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++#if defined(ARM64_BOARD_CONFIG_UMI)
++#include <pexpert/arm64/UMI.h>
++#endif
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ /* Mach MIG declaration is not included by BSD's exported thread.h. */
+@@ -22,14 +28,45 @@ extern int sweet_rpmh_vreg_enable(const char *res, unsigned mv);
+ extern void sweet_hid_touch(int finger, int down, int x, int y);
+ void sweet_touch_init(void);
+ 
+-#define TOUCH_SE_PA      0x00a84000u
+ #define TOUCH_GCC_PA     0x00100000u
+-#define TOUCH_NORTH_PA   0x03900000u /* DT TLMM + NORTH (0x500000) */
+-#define TOUCH_GCC_VOTE   0x5200cu
+-#define TOUCH_RCG       0x18148u    /* wrapper1 LOCAL S1 = global SE7 */
+ #define TOUCH_GPIO_CFG(n) ((uint32_t)(n) * 0x1000u)
+ #define TOUCH_GPIO_IO(n)  (TOUCH_GPIO_CFG(n) + 4u)
+ #define TOUCH_MAX        10u
++#if defined(UMI)
++#define TOUCH_SE_PA       UMI_TOUCH_SE_PHYS
++#define TOUCH_NORTH_PA    UMI_TOUCH_GPIO_PHYS
++#define TOUCH_NORTH_SIZE  UMI_TOUCH_GPIO_SIZE
++#define TOUCH_RCG         UMI_TOUCH_GCC_RCG
++#define TOUCH_RCG_HALT    UMI_TOUCH_GCC_HALT
++#define TOUCH_GCC_VOTE    UMI_TOUCH_GCC_VOTE
++#define TOUCH_GCC_MASK    UMI_TOUCH_GCC_MASK
++#define TOUCH_GPIO_SDA    UMI_TOUCH_SDA_GPIO
++#define TOUCH_GPIO_SCL    UMI_TOUCH_SCL_GPIO
++#define TOUCH_GPIO_RESET  UMI_TOUCH_RESET_GPIO
++#define TOUCH_GPIO_IRQ    UMI_TOUCH_IRQ_GPIO
++#define TOUCH_GPIO_POWER  UMI_TOUCH_POWER_GPIO
++#define TOUCH_FTS_ADDR    UMI_TOUCH_FTS_ADDR
++#define TOUCH_MAX_X       UMI_TOUCH_MAX_X
++#define TOUCH_MAX_Y       UMI_TOUCH_MAX_Y
++#define TOUCH_BUS_NAME    "SE13"
++#else
++#define TOUCH_SE_PA       0x00a84000u
++#define TOUCH_NORTH_PA    0x03900000u /* DT TLMM + NORTH (0x500000) */
++#define TOUCH_NORTH_SIZE  0x5b000u
++#define TOUCH_RCG         0x18148u    /* wrapper1 LOCAL S1 = global SE7 */
++#define TOUCH_RCG_HALT    0x18144u
++#define TOUCH_GCC_VOTE    0x5200cu
++#define TOUCH_GCC_MASK    ((0x0fu << 18) | (1u << 23))
++#define TOUCH_GPIO_SDA    6
++#define TOUCH_GPIO_SCL    7
++#define TOUCH_GPIO_RESET  8
++#define TOUCH_GPIO_IRQ    9
++#define TOUCH_GPIO_POWER  90
++#define TOUCH_FTS_ADDR    0x38
++#define TOUCH_MAX_X       1079
++#define TOUCH_MAX_Y       2399
++#define TOUCH_BUS_NAME    "SE7"
++#endif
+ #define TOUCH_GOODIX     1
+ #define TOUCH_FTS        2
+ /* GT9896 is Yellowstone in Xiaomi sweet-r-oss, not the Berlin protocol. */
+@@ -136,8 +173,8 @@ touch_gpio(unsigned pin, unsigned mux, unsigned pull, unsigned drive, bool out,
+ static bool
+ touch_clocks(void)
+ {
+-	/* Vote on only wrapper1 and SE7, preserving other clock users. */
+-	uint32_t mask = (0x0fu << 18) | (1u << 23);
++	/* Vote on only wrapper1 and this SE, preserving other clock users. */
++	uint32_t mask = TOUCH_GCC_MASK;
+ 	touch_wr(st.gcc, TOUCH_GCC_VOTE, touch_rd(st.gcc, TOUCH_GCC_VOTE) | mask);
+ 	uint32_t dfs = touch_rd(st.gcc, TOUCH_RCG + 0x14u);
+ 	uint32_t cfg = touch_rd(st.gcc, TOUCH_RCG + 4u);
+@@ -160,7 +197,12 @@ touch_clocks(void)
+ 			return false;
+ 		}
+ 	}
+-	const uint32_t branches[] = {0x18004, 0x18008, 0x1800c, 0x18010, 0x18144};
++#if defined(UMI)
++	/* wrapper1 core/core_2x, m_ahb, s_ahb and SE13 branch halt registers */
++	const uint32_t branches[] = {0x23138, 0x23140, 0x18004, 0x18008, TOUCH_RCG_HALT};
++#else
++	const uint32_t branches[] = {0x18004, 0x18008, 0x1800c, 0x18010, TOUCH_RCG_HALT};
++#endif
+ 	for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); ++i) {
+ 		if (!touch_wait_clear(st.gcc, branches[i], 1u << 31)) {
+ 			printf("SWEET TOUCH: GCC branch %#x halted (%#x)\n", branches[i],
+@@ -425,7 +467,7 @@ touch_goodix(void)
+ 		unsigned px = touch_be16(p + 2), py = touch_be16(p + 4);
+ 		/* Low nibble 1/3 denotes pen data in the vendor parser. */
+ 		if ((p[0] & 15u) == 1u || (p[0] & 15u) == 3u || id >= TOUCH_MAX ||
+-		    (mask & (1u << id)) || px > 1079 || py > 2399) {
++		    (mask & (1u << id)) || px > TOUCH_MAX_X || py > TOUCH_MAX_Y) {
+ 			(void)touch_goodix_ack();
+ 			return EIO;
+ 		}
+@@ -446,7 +488,7 @@ touch_focaltech(void)
+ 	uint8_t buf[63];
+ 	int x[TOUCH_MAX] = {0}, y[TOUCH_MAX] = {0};
+ 	uint32_t mask = 0, seen = 0;
+-	int err = touch_read(0x38, 0, false, buf, sizeof(buf));
++	int err = touch_read(TOUCH_FTS_ADDR, 0, false, buf, sizeof(buf));
+ 	if (err) {
+ 		return err;
+ 	}
+@@ -472,7 +514,7 @@ touch_focaltech(void)
+ 		}
+ 		unsigned px = ((unsigned)(p[0] & 15u) << 8) | p[1];
+ 		unsigned py = ((unsigned)(p[2] & 15u) << 8) | p[3];
+-		if (px > 1079 || py > 2399) {
++		if (px > TOUCH_MAX_X || py > TOUCH_MAX_Y) {
+ 			return EIO;
+ 		}
+ 		mask |= 1u << id;
+@@ -558,9 +600,9 @@ touch_thread(void *arg, wait_result_t result)
+ 	(void)PE_parse_boot_argn("sweettouchdelay", &delay_s, sizeof(delay_s));
+ 	printf("SWEET TOUCH: starting in %u s\n", delay_s);
+ 	touch_wait(delay_s * 1000u);
+-	printf("SWEET TOUCH: mapping GCC/TLMM/SE7\n");
++	printf("SWEET TOUCH: mapping GCC/TLMM/%s\n", TOUCH_BUS_NAME);
+ 	st.gcc = ml_io_map(TOUCH_GCC_PA, 0x60000);
+-	st.gpio = ml_io_map(TOUCH_NORTH_PA, 0x5b000);
++	st.gpio = ml_io_map(TOUCH_NORTH_PA, TOUCH_NORTH_SIZE);
+ 	st.se = ml_io_map(TOUCH_SE_PA, 0x4000);
+ 	if (!st.gcc || !st.gpio || !st.se) {
+ 		printf("SWEET TOUCH: MMIO mapping failed\n");
+@@ -569,25 +611,32 @@ touch_thread(void *arg, wait_result_t result)
+ 	if (!touch_clocks() || !touch_se_init()) {
+ 		goto out;
+ 	}
+-	printf("SWEET TOUCH: TLMM reset=%#x irq=%#x vdd90=%#x; voting L11C through RPMh\n",
+-	    touch_rd(st.gpio, TOUCH_GPIO_IO(8)), touch_rd(st.gpio, TOUCH_GPIO_IO(9)),
+-	    touch_rd(st.gpio, TOUCH_GPIO_IO(90)));
++	printf("SWEET TOUCH: TLMM reset=%#x irq=%#x power=%#x\n",
++	    touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_RESET)),
++	    touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_IRQ)),
++	    touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_POWER)));
+ 	/* Keep the IC in reset while its rails settle; IRQ stays an input. */
+-	touch_gpio(9, 0, 3, 3, false, false); /* IRQ input, 8 mA, pull-up */
+-	touch_gpio(8, 0, 3, 3, true, false);
++	touch_gpio(TOUCH_GPIO_IRQ, 0, 3, 3, false, false); /* IRQ input, 8 mA, pull-up */
++	touch_gpio(TOUCH_GPIO_RESET, 0, 3, 3, true, false);
++#if defined(UMI)
++	/* PM8150A L1 (1.8 V) is left on by firmware; 3.3 V is a TLMM switch. */
++	printf("SWEET TOUCH: PM8150A L1 assumed on; enabling TLMM GPIO%d\n",
++	    TOUCH_GPIO_POWER);
++#else
+ 	int power_error = sweet_rpmh_vreg_enable("ldoc11", 3200);
+ 	if (power_error) {
+ 		printf("SWEET TOUCH: L11C RPMh enable failed %d; probes skipped\n", power_error);
+ 		goto out;
+ 	}
+-	touch_gpio(90, 0, 0, 0, true, true); /* board digital power enable */
++#endif
++	touch_gpio(TOUCH_GPIO_POWER, 0, 0, 0, true, true); /* board digital power enable */
+ 	touch_wait(10); /* conservative rail settling; not a DT timing value */
+-	touch_gpio(6, 1, 0, 0, false, false); /* qup11 SDA/SCL, 2 mA */
+-	touch_gpio(7, 1, 0, 0, false, false);
+-	/* Vendor GT9896 dev_confirm: reset low 2 ms, then high. */
+-	touch_gpio(8, 0, 3, 3, true, false);
++	touch_gpio(TOUCH_GPIO_SDA, 1, 0, 0, false, false); /* QUP SDA/SCL, 2 mA */
++	touch_gpio(TOUCH_GPIO_SCL, 1, 0, 0, false, false);
++	/* Vendor GT9896/FTS dev_confirm: reset low 2 ms, then high. */
++	touch_gpio(TOUCH_GPIO_RESET, 0, 3, 3, true, false);
+ 	touch_wait(2);
+-	touch_gpio(8, 0, 3, 3, true, true);
++	touch_gpio(TOUCH_GPIO_RESET, 0, 3, 3, true, true);
+ 	touch_wait(300); /* exceeds vendor 5 ms test + 95 ms post-test wait */
+ 	uint8_t gid[32], legacy[32], fid1 = 0, fid2 = 0;
+ 	st.probing = true;
+@@ -595,10 +644,10 @@ touch_thread(void *arg, wait_result_t result)
+ 	printf("SWEET TOUCH: probe 0x5d err=%d pid=%02x%02x%02x%02x fw=%02x.%02x.%02x.%02x irq=%#x\n",
+ 	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
+ 	(void)touch_probe_info(0x8240, legacy);
+-	int fe1 = touch_read(0x38, 0xa3, false, &fid1, 1);
+-	int fe2 = touch_read(0x38, 0x9f, false, &fid2, 1);
+-	printf("SWEET TOUCH: probe 0x38 err=%d/%d chip-id=%02x:%02x irq=%#x\n",
+-	    fe1, fe2, fid1, fid2, st.irq_status);
++	int fe1 = touch_read(TOUCH_FTS_ADDR, 0xa3, false, &fid1, 1);
++	int fe2 = touch_read(TOUCH_FTS_ADDR, 0x9f, false, &fid2, 1);
++	printf("SWEET TOUCH: probe %#x err=%d/%d chip-id=%02x:%02x irq=%#x\n",
++	    TOUCH_FTS_ADDR, fe1, fe2, fid1, fid2, st.irq_status);
+ 	st.probing = false;
+ 	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
+ 	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
+@@ -608,12 +657,13 @@ touch_thread(void *arg, wait_result_t result)
+ 		goto out;
+ 	}
+ 	st.kind = goodix ? TOUCH_GOODIX : TOUCH_FTS;
+-	printf("SWEET TOUCH: selected %s, 1080x2400, poll=10ms irq-hint=%d\n",
+-	    goodix ? "GT9896 Yellowstone" : "Focaltech 54:52", st.irq_hint);
++	printf("SWEET TOUCH: selected %s on %s, %dx%d, poll=10ms irq-hint=%d\n",
++	    goodix ? "GT9896 Yellowstone" : "Focaltech 54:52", TOUCH_BUS_NAME,
++	    TOUCH_MAX_X + 1, TOUCH_MAX_Y + 1, st.irq_hint);
+ 	unsigned errors = 0, ticks = 0;
+ 	while (!st.dead) {
+ 		/* Optional IRQ hint still reads every 100ms, and always while down. */
+-		if (!st.irq_hint || st.active || !(touch_rd(st.gpio, TOUCH_GPIO_IO(9)) & 1u) ||
++		if (!st.irq_hint || st.active || !(touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_IRQ)) & 1u) ||
+ 		    (++ticks % 10u) == 0) {
+ 			int err = st.kind == TOUCH_GOODIX ? touch_goodix() : touch_focaltech();
+ 			if (err) {
+diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
+index b6c1a41..c137bd2 100644
+--- a/bsd/dev/sweet_usb.c
++++ b/bsd/dev/sweet_usb.c
+@@ -3,8 +3,9 @@
+  *
+  * The phone's USB is a Synopsys DWC3 (USB 2.0 only, maximum-speed
+  * high-speed) at 0x0a600000 behind Qualcomm's dwc-usb3-msm wrapper, with a
+- * QUSB2 PHY at 0x088e2000; its power domain is the USB30_PRIM GDSC and its
+- * clocks come from GCC (offsets from Linux gcc-sdmmagpie.c). ABL uses this
++ * QUSB2-compatible PHY (sweet 0x088e2000, umi 0x088e3000); its power domain
++ * is the USB30_PRIM GDSC and its clocks come from GCC (offsets from
++ * gcc-sdmmagpie.c for sweet, gcc-kona.c for umi). ABL uses this
+  * controller for fastboot; this probe only reports what state it is left
+  * in after `fastboot boot`. It never writes a register, and it touches the
+  * DWC3 / PHY register blocks only when the GCC status registers say their
+@@ -43,26 +44,51 @@ static void sweet_usb_gadget_start(vm_offset_t dwc);
+ extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+ 
+ #define GCC_PA                  0x00100000
++#if defined(ARM64_BOARD_CONFIG_UMI)
++/*
++ * SM8250: usb30_prim GDSC lives in the 0x10f000 block, while its CBCRs are
++ * in 0x0f000. The PHY uses the snps-femto driver at 0x088e3000 and has no
++ * AHB2PHY gate; 0x0f054 is its aux clock.
++ */
++#define GCC_SIZE                0x00120000
++#define GCC_USB30_PRIM_GDSCR    0x10f004        /* bit 31: power on */
++#define USB_CBCR_MASTER         0x0f010
++#define USB_CBCR_SLEEP          0x0f018
++#define USB_CBCR_UTMI           0x0f01c
++#define USB_CBCR_CFG            0x0f07c
++#define USB_CBCR_AGGRE          0x0f080
++#define USB_CBCR_AHB2PHY        0x0f054
++#define USB_CBCR_CLKREF         0x8c010
++#define QUSB2_PA                0x088e3000
++#else
+ #define GCC_SIZE                0x00090000
+ #define GCC_USB30_PRIM_GDSCR    0x0f004         /* bit 31: power on */
++#define USB_CBCR_MASTER         0x0f010
++#define USB_CBCR_SLEEP          0x0f014
++#define USB_CBCR_UTMI           0x0f018
++#define USB_CBCR_CFG            0x0502c
++#define USB_CBCR_AGGRE          0x8201c
++#define USB_CBCR_AHB2PHY        0x6a004
++#define USB_CBCR_CLKREF         0x8c010
++#define QUSB2_PA                0x088e2000
++#endif
+ #define CBCR_CLK_OFF            (1u << 31)
+ 
+ static const struct {
+ 	const char *name;
+ 	uint32_t    off;
+ } usb_cbcr[] = {
+-	{ "master", 0x0f010 },
+-	{ "sleep", 0x0f014 },
+-	{ "utmi", 0x0f018 },
+-	{ "cfg-noc-axi", 0x0502c },
+-	{ "aggre-axi", 0x8201c },
+-	{ "ahb2phy", 0x6a004 },
+-	{ "clkref", 0x8c010 },
++	{ "master", USB_CBCR_MASTER },
++	{ "sleep", USB_CBCR_SLEEP },
++	{ "utmi", USB_CBCR_UTMI },
++	{ "cfg-noc-axi", USB_CBCR_CFG },
++	{ "aggre-axi", USB_CBCR_AGGRE },
++	{ "ahb2phy", USB_CBCR_AHB2PHY },
++	{ "clkref", USB_CBCR_CLKREF },
+ };
+ 
+ #define DWC3_PA                 0x0a600000
+ #define DWC3_SIZE               0x0000d000
+-#define QUSB2_PA                0x088e2000
+ #define QUSB2_SIZE              0x00000400
+ 
+ static uint32_t
+diff --git a/config/MASTER.arm64.umi b/config/MASTER.arm64.umi
+new file mode 100644
+index 0000000..21fea9a
+--- /dev/null
++++ b/config/MASTER.arm64.umi
+@@ -0,0 +1,115 @@
++#
++# umi (Xiaomi Mi 10, SM8250): same generic bring-up configuration as sweet.
++# Keep this file in sync with config/MASTER.arm64.sweet. Apple's own SoC configs
++# link those from the KDK's closed lib<SOC>.os.<CONFIG>.a instead, which is
++# arm64e and Apple-silicon specific. kperf/kpc stay (xnu does not build without
++# kperf); osfmk/arm64/kpc.c is a stub with no hardware counters.
++#
++#
++# Mach Operating System
++# Copyright (c) 1986 Carnegie-Mellon University
++# Copyright 2001-2018 Apple Inc.
++#
++# All rights reserved.  The CMU software License Agreement
++# specifies the terms and conditions for use and redistribution.
++#
++######################################################################
++#
++#  Master Apple configuration file (see the master machine independent
++#  configuration file for a description of the file format).
++#
++######################################################################
++#
++#  Standard Apple OS Configurations:
++#  -------- ----- -- ---------------
++#
++#  KERNEL_BASE =    [ arm64 config_pmap_ppl medium msgb_large config_requires_u32_munging config_delay_idle_sleep config_proc_udata_storage config_uexc config_darkboot nos_arm_asm nos_arm_pmap ]
++#  KERNEL_RELEASE = [ KERNEL_BASE ]
++#  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_proc_resource_limits ]
++#  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_proc_resource_limits ]
++#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump pgo config_personas ]
++#  BSD_RELEASE =    [ BSD_BASE ]
++#  BSD_DEV =        [ BSD_BASE config_vnguard ]
++#  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
++#  FILESYS_BASE =   [ devfs fdesc fifo mockfs sweet_hfs fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_searchfs config_volfs config_appledouble nullfs bindfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
++#  FILESYS_RELEASE= [ FILESYS_BASE ]
++#  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
++#  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
++#  NFS =            [ nfsserver ]
++#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_monitor config_nexus_flowswitch config_nexus_netif ]
++#  SKYWALK_RELEASE = [ SKYWALK_BASE ]
++#  SKYWALK_DEV =    [ SKYWALK_BASE ]
++#  SKYWALK_DEBUG =  [ SKYWALK_BASE ]
++#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk config_mbuf_jumbo if_bridge MULTIPATH if_fake remote_vif ]
++#  NETWORKING_RELEASE = [ NETWORKING ]
++#  NETWORKING_DEV = [ NETWORKING_RELEASE packet_mangler if_headless ]
++#  NETWORKING_DEBUG = [ NETWORKING_DEV ]
++#  VPN =            [ ipsec flow_divert necp content_filter ]
++#  PF =             [ pf pflog ]
++#  MULTIPATH =      [ multipath mptcp ]
++#if SOC_CONFIG_t8020 || SOC_IS_VIRTUALIZED
++#  HIBERNATION =    [ ]
++#else /*!(SOC_CONFIG_t8020 || SOC_IS_VIRTUALIZED)*/
++#  HIBERNATION =    [ ]
++#endif /*SOC_CONFIG_t8020 || SOC_IS_VIRTUALIZED*/
++#  IOKIT_BASE =     [ iokit iokitcpp no_kernel_hid config_sleep iokitstats HIBERNATION ]
++#  IOKIT_RELEASE =  [ IOKIT_BASE ]
++#  IOKIT_DEV =      [ IOKIT_BASE iotracking ]
++#  IOKIT_DEBUG =    [ IOKIT_BASE iotracking ]
++#  LIBKERN_BASE =   [ libkerncpp config_blocks config_kec_fips crypto_sha2 config_img4 ]
++#  LIBKERN_RELEASE =[ LIBKERN_BASE zlib ]
++#  LIBKERN_DEV =    [ LIBKERN_BASE zlib iotracking ]
++#  LIBKERN_DEBUG =  [ LIBKERN_BASE zlib iotracking ]
++#  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption config_pervasive_energy PERFMON_BASE kperf kpc ]
++#  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
++#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
++#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
++#if SOC_IS_VIRTUALIZED
++#  PARAVIRT_BASE =  [ config_pv_ticket ]
++#else
++#  PARAVIRT_BASE =  [ ]
++#endif /*SOC_IS_VIRTUALIZED*/
++#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE config_ledger_interval_max ]
++#  MACH_RELEASE =   [ MACH_BASE ]
++#  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace ]
++#  MACH_DEBUG =     [ MACH_BASE config_io_accounting importance_trace importance_debug ]
++#  SCHED_BASE =     [ config_sched_traditional config_sched_multiq config_sched_deferred_ast config_clutch config_sched_sfi config_sched_auto_join config_preadopt_tg ]
++#  SCHED_RELEASE =  [ SCHED_BASE ]
++#  SCHED_DEV =      [ SCHED_BASE ]
++#  SCHED_DEBUG =    [ SCHED_BASE config_sched_grrr config_sched_proto ]
++#  VM_BASE =        [ vm_pressure_events memorystatus config_code_decryption encrypted_swap config_deferred_reclaim ]
++#  VM_RELEASE =     [ VM_BASE ]
++#  VM_DEV =         [ VM_BASE dynamic_codesigning pgzalloc ]
++#  VM_DEBUG =       [ VM_BASE dynamic_codesigning pgzalloc ]
++#  VM_KASAN =       [ VM_BASE dynamic_codesigning config_kasan config_ubsan config_kcov config_ksancov kernel_tbi ]
++#  SECURITY =       [ config_macf config_audit kernel_integrity config_csr config_csr_from_dt config_setuid config_kas_info config_secure_bsd_root config_arcade config_supplemental_signatures second_static_trust_cache reslide_shared_cache ]
++#  BASE =           [ PF VPN SECURITY NFS ]
++#  RELEASE =        [ BASE KERNEL_RELEASE BSD_RELEASE FILESYS_RELEASE SKYWALK_RELEASE NETWORKING_RELEASE IOKIT_RELEASE LIBKERN_RELEASE    PERF_DBG_RELEASE MACH_RELEASE SCHED_RELEASE VM_RELEASE ]
++#  DEVELOPMENT =    [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_DEV     ]
++#  DEBUG =          [ BASE KERNEL_DEBUG   BSD_DEBUG   FILESYS_DEBUG   SKYWALK_DEBUG   NETWORKING_DEBUG   IOKIT_DEBUG   LIBKERN_DEBUG      PERF_DBG_DEBUG   MACH_DEBUG   SCHED_DEBUG   VM_DEBUG   ]
++#  KASAN =          [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_KASAN   ]
++#
++######################################################################
++#
++machine		"arm64"						# <arm64>
++
++makeoptions	OSFMK_MACHINE = "arm64"				# <mach>
++
++options		COUNT_SYSCALLS		# count bsd system calls 	# <countcalls>
++options     TRASH_VFP_ON_SAVE   # <debug,trash_vfp>
++options		ALTERNATE_DEBUGGER	# <alternate_debugger>
++
++options   CONFIG_VNODES=1024		# <xsmall>
++
++options   CONFIG_FREEZE_SUSPENDED_MIN=4		# <xsmall>
++
++options	  CONFIG_MACH_APPROXIMATE_TIME
++
++options   CONFIG_KERNEL_INTEGRITY		# <kernel_integrity>
++
++options CONFIG_MACF_LAZY_VNODE_LABELS   # Turn on labels, don't preallocate
++
++options CONFIG_HYPERVISOR_PUBLIC   # unrestricted entitlement for hypervisor
++
++options   CONFIG_RESLIDE_SHARED_CACHE		# <reslide_shared_cache>
++options   CONFIG_KERNEL_TBI		# <kernel_tbi>
+diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
+index a62416c..b0a6ac0 100644
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -75,8 +75,9 @@ enum {
+  * screens (UIKit: "No status bar visual provider for screen", the red
+  * rdar://45025538 bar for 360x800 points). The display is therefore
+  * presented as the iPhone X panel, 1125x2436 (375x812 points @3x), and the
+- * centered 1080x2400 part of it is shown on the 1080x2400 panel.
+- * Boot-arg sweetfb_native=1 presents the real panel size instead.
++ * centered native panel area is shown on the real panel (sweet 1080x2400,
++ * umi 1080x2340). Boot-arg sweetfb_native=1 presents the real panel size
++ * instead.
+  */
+ #define SWEET_FB_LOGICAL_W              1125
+ #define SWEET_FB_LOGICAL_H              2436
+diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
+index 27bc49d..682dcf0 100644
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -21,6 +21,7 @@
+ #include <IOKit/IOTimerEventSource.h>
+ #include <libkern/c++/OSArray.h>
+ #include <pexpert/pexpert.h>
++#include <pexpert/arm64/board_config.h>
+ 
+ #include "IOHIDEventService.h"
+ #include "IOHIDEventServiceUserClient.h"
+@@ -356,6 +357,13 @@ OSDefineMetaClassAndStructors(SweetHIDButtons, IOHIDEventService);
+  * app-switcher gesture.
+  */
+ #define SWEET_TOUCH_EDGE_PX 48
++#if defined(UMI)
++#define SWEET_PANEL_W 1080
++#define SWEET_PANEL_H 2340
++#else
++#define SWEET_PANEL_W 1080
++#define SWEET_PANEL_H 2400
++#endif
+ class SweetHIDTouch : public IOHIDEventService {
+ 	OSDeclareDefaultStructors(SweetHIDTouch);
+ public:
+@@ -434,10 +442,10 @@ SweetHIDTouch::start(IOService *provider)
+ 	}
+ 	int native = 0;
+ 	PE_parse_boot_argn("sweetfb_native", &native, sizeof(native));
+-	fLogicalW = native ? 1080 : 1125;
+-	fLogicalH = native ? 2400 : 2436;
+-	fOffX = (fLogicalW - 1080) / 2;
+-	fOffY = (fLogicalH - 2400) / 2;
++	fLogicalW = native ? SWEET_PANEL_W : 1125;
++	fLogicalH = native ? SWEET_PANEL_H : 2436;
++	fOffX = (fLogicalW - SWEET_PANEL_W) / 2;
++	fOffY = (fLogicalH - SWEET_PANEL_H) / 2;
+ 	/* The digitizer covers the main display (backboardd maps it 1:1). */
+ 	setProperty("DisplayIntegrated", kOSBooleanTrue);
+ 	setProperty("SurfaceWidth", (unsigned long long)(68 << 16), 32);	/* mm, 16.16 */
+@@ -458,8 +466,8 @@ SweetHIDTouch::touch(int finger, bool down, int x, int y)
+ 	if (finger < 0 || finger >= SWEET_TOUCH_FINGERS) {
+ 		return;
+ 	}
+-	x = x < 0 ? 0 : (x > 1079 ? 1079 : x);
+-	y = y < 0 ? 0 : (y > 2399 ? 2399 : y);
++	x = x < 0 ? 0 : (x > SWEET_PANEL_W - 1 ? SWEET_PANEL_W - 1 : x);
++	y = y < 0 ? 0 : (y > SWEET_PANEL_H - 1 ? SWEET_PANEL_H - 1 : y);
+ 
+ 	IOLockLock(fLock);
+ 	bool was = fDown[finger];
+@@ -472,8 +480,8 @@ SweetHIDTouch::touch(int finger, bool down, int x, int y)
+ 		return;
+ 	}
+ 	if (!was && down) {
+-		fEdge[finger] = x < SWEET_TOUCH_EDGE_PX || x > 1079 - SWEET_TOUCH_EDGE_PX ||
+-		    y < SWEET_TOUCH_EDGE_PX || y > 2399 - SWEET_TOUCH_EDGE_PX;
++		fEdge[finger] = x < SWEET_TOUCH_EDGE_PX || x > SWEET_PANEL_W - 1 - SWEET_TOUCH_EDGE_PX ||
++		    y < SWEET_TOUCH_EDGE_PX || y > SWEET_PANEL_H - 1 - SWEET_TOUCH_EDGE_PX;
+ 	}
+ 
+ 	collection = IOHIDEvent::digitizerEvent(now, 0, kIOHIDDigitizerTransducerTypeHand, false, 0, 0, 0);
+diff --git a/libkern/conf/Makefile.template b/libkern/conf/Makefile.template
+index aca295c..e46e633 100644
+--- a/libkern/conf/Makefile.template
++++ b/libkern/conf/Makefile.template
+@@ -19,7 +19,7 @@ include $(MakeInc_def)
+ CFLAGS+= -include meta_features.h -DLIBKERN_KERNEL_PRIVATE -DOSALLOCDEBUG=1
+ SFLAGS+= -include meta_features.h
+ 
+-ifeq ($(CURRENT_MACHINE_CONFIG),SWEET)
++ifeq ($(filter $(CURRENT_MACHINE_CONFIG),SWEET UMI),$(CURRENT_MACHINE_CONFIG))
+ SWEET_AES_ROOT = $(SRCROOT)/libkern/crypto/sweet_bearssl
+ SWEET_AES_INC = -I$(SWEET_AES_ROOT)/inc -I$(SWEET_AES_ROOT)/src
+ sweet_aes.o_INCFLAGS = $(SWEET_AES_INC)
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index 9a748ea..9b76e8e 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -29,7 +29,7 @@ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else ifneq ($(findstring _host,$(RC_ProjectName)),)
+ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else
+-SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE SWEET
++SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE SWEET UMI
+ 
+ endif
+ 
+@@ -62,6 +62,9 @@ MACHINE_FLAGS_ARM64_T6000 = -DARM64_BOARD_CONFIG_T6000 		-mcpu=apple-a14
+ MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a
+ MACHINE_FLAGS_ARM64_BCM2837 = -DARM64_BOARD_CONFIG_BCM2837
+ MACHINE_FLAGS_ARM64_SWEET = -DARM64_BOARD_CONFIG_SWEET                -march=armv8.2-a+crypto
++# UMI is the SM8250 board on the same generic bring-up platform as SWEET;
++# the SWEET define keeps the shared implementation files compiled.
++MACHINE_FLAGS_ARM64_UMI = -DARM64_BOARD_CONFIG_UMI -DARM64_BOARD_CONFIG_SWEET -march=armv8.2-a+crypto
+ 
+ 
+ #
+@@ -260,8 +263,8 @@ ifeq ($(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG),)
+ # Without embdedded device map, use a default arch string
+ export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := $(shell echo $(CURRENT_ARCH_CONFIG) | tr A-Z a-z)
+ ifneq ($(filter arm64,$(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG)),)
+-# sweet's Cortex-A76/A55 have no pointer authentication: stay plain arm64
+-ifneq ($(CURRENT_MACHINE_CONFIG),SWEET)
++# sweet/umi Cortex-A76/A55/A77 have no pointer authentication: stay plain arm64
++ifeq ($(filter $(CURRENT_MACHINE_CONFIG),SWEET UMI),)
+ export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64e
+ endif
+ endif
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index 023086f..fc99484 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -515,7 +515,11 @@ LEXT(start_first_cpu)
+ 
+ #if defined(SWEET)
+ 	/* Stage 0: white 64x32 band, no stack or page tables needed. */
++#if defined(UMI)
++	MOV64	x0, (0x9c000000 + 2308 * 4320)
++#else
+ 	MOV64	x0, (0x9c000000 + 2368 * 4320)
++#endif
+ 	mov		w1, #-1
+ 	mov		x2, #32
+ 	mov		x4, #4320
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index 6928957..a8c178e 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -14,7 +14,11 @@
+ static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x9c000000;
+ #define EARLY_FB early_fb
+ #define EARLY_WIDTH 1080u
++#if defined(UMI)
++#define EARLY_HEIGHT 2340u
++#else
+ #define EARLY_HEIGHT 2400u
++#endif
+ #define EARLY_STRIDE (4320u / 4)
+ #define EARLY_SCALE 2u
+ #define EARLY_CELL_W (8u * EARLY_SCALE)
+diff --git a/pexpert/pexpert/arm64/Makefile b/pexpert/pexpert/arm64/Makefile
+index c7d274f..d9c8153 100644
+--- a/pexpert/pexpert/arm64/Makefile
++++ b/pexpert/pexpert/arm64/Makefile
+@@ -18,7 +18,8 @@ PRIVATE_KERNELFILES = \
+ 	H13.h \
+ 	VMAPPLE.h \
+ 	BCM2837.h \
+-	SWEET.h
++	SWEET.h \
++	UMI.h
+ 
+ 
+ # Headers installed into System.framework/PrivateHeaders (userspace internal SDK only).
+diff --git a/pexpert/pexpert/arm64/UMI.h b/pexpert/pexpert/arm64/UMI.h
+new file mode 100644
+index 0000000..f3e5c77
+--- /dev/null
++++ b/pexpert/pexpert/arm64/UMI.h
+@@ -0,0 +1,79 @@
++/*
++ * Board config for the Xiaomi Mi 10 ("umi", Qualcomm SM8250 /
++ * Snapdragon 865): Kryo 585 = one Cortex-A77 prime, three Cortex-A77
++ * performance and four Cortex-A55 efficiency cores, ARMv8.2, no PAC.
++ *
++ * UMI uses the generic SWEET bring-up platform (same 16K pages, GICv3
++ * Group 1 and PSCI) and adds the SM8250-specific values that differ from
++ * the Redmi Note 10 Pro (sweet, SM7150). The build defines both
++ * ARM64_BOARD_CONFIG_SWEET and ARM64_BOARD_CONFIG_UMI so the existing
++ * sweet implementation files remain available; code that needs a UMI
++ * value selects it with #if defined(UMI).
++ */
++
++#ifndef _PEXPERT_ARM64_UMI_H
++#define _PEXPERT_ARM64_UMI_H
++
++#include <pexpert/arm64/SWEET.h>
++
++#define UMI                       1
++
++/* Machine-readable board name used in logs and tools. */
++#define UMI_BOARD_NAME            "umi"
++#define UMI_SOC_NAME              "sm8250"
++
++/*
++ * Panel and continuous-splash framebuffer. The Mi 10 panel is 1080x2340;
++ * ABL leaves the continuous splash in the same reserved region as sweet.
++ * XNU still presents the iPhone X logical size (1125x2436) to userland.
++ */
++#define UMI_PANEL_WIDTH           1080
++#define UMI_PANEL_HEIGHT          2340
++#define UMI_FB_PHYS               0x9c000000
++#define UMI_FB_SIZE               0x02300000
++
++/* Internal UFS host (ufshc@1d84000); ABL leaves the link running. */
++#define UMI_UFS_PHYS              0x1d84000
++#define UMI_UFS_SIZE              0x3000
++
++/*
++ * SM8250 uses the standard ARM generic-timer PPIs (GIC_PPI 11 for the
++ * virtual timer), unlike SM7150's Qualcomm numbering.
++ */
++#undef  SWEET_VTIMER_INTID
++#define SWEET_VTIMER_INTID        27
++
++/*
++ * Touch: FocalTech FTS at 0x49 on QUPv3 SE13 (wrapper1 local S5,
++ * 0xa94000), SDA/SCL TLMM 36/37, reset 38, IRQ 39, 3.3 V enable 69.
++ * The 1.8 V rail is PM8150A L1 (left enabled by firmware for now).
++ */
++#define UMI_TOUCH_SE_PHYS         0x00a94000
++#define UMI_TOUCH_GCC_RCG         0x00018600
++#define UMI_TOUCH_GCC_HALT        0x000185fc
++#define UMI_TOUCH_GCC_VOTE        0x00052008
++#define UMI_TOUCH_GCC_MASK        ((0x0fu << 18) | (1u << 27))
++#define UMI_TOUCH_GPIO_PHYS       0x0f000000
++#define UMI_TOUCH_GPIO_SIZE       0x01000000
++#define UMI_TOUCH_SDA_GPIO        36
++#define UMI_TOUCH_SCL_GPIO        37
++#define UMI_TOUCH_RESET_GPIO      38
++#define UMI_TOUCH_IRQ_GPIO        39
++#define UMI_TOUCH_POWER_GPIO      69
++#define UMI_TOUCH_FTS_ADDR        0x49
++#define UMI_TOUCH_MAX_X           1079
++#define UMI_TOUCH_MAX_Y           2339
++
++/*
++ * Keys: PM8150 SID 0 PON (power + volume-down) and PM8150 GPIO6
++ * (volume-up, active low). SPMI PPID = SID << 8 | (0xc0 + gpio - 1).
++ */
++#define UMI_KEYS_PON_PPID         0x0008
++#define UMI_KEYS_GPIO_PPID        0x00c5
++
++/* Descriptive CPU frequencies for the ADT (Hz). */
++#define UMI_CPU_PRIME_HZ          2841600000u
++#define UMI_CPU_GOLD_HZ           2419200000u
++#define UMI_CPU_SILVER_HZ         1804800000u
++
++#endif /* ! _PEXPERT_ARM64_UMI_H */
+diff --git a/pexpert/pexpert/arm64/board_config.h b/pexpert/pexpert/arm64/board_config.h
+index 88e524a..1a47f86 100644
+--- a/pexpert/pexpert/arm64/board_config.h
++++ b/pexpert/pexpert/arm64/board_config.h
+@@ -97,7 +97,7 @@
+ #define CORE_NCTRS                     8 /* Placeholder; KPC is not enabled for this target */
+ #endif  /* ARM64_BOARD_CONFIG_BCM2837 */
+ 
+-#ifdef ARM64_BOARD_CONFIG_SWEET
++#if defined(ARM64_BOARD_CONFIG_SWEET) && !defined(ARM64_BOARD_CONFIG_UMI)
+ #include <pexpert/arm64/SWEET.h>
+ 
+ #define MAX_L2_CLINE                   6
+@@ -106,7 +106,18 @@
+ 
+ #define CORE_NCTRS                     8 /* Placeholder; KPC is not enabled for this target */
+ 
+-#endif  /* ARM64_BOARD_CONFIG_SWEET */
++#endif  /* ARM64_BOARD_CONFIG_SWEET && !ARM64_BOARD_CONFIG_UMI */
++
++#ifdef ARM64_BOARD_CONFIG_UMI
++#include <pexpert/arm64/UMI.h>
++
++#define MAX_L2_CLINE                   6
++#define MAX_CPUS                       8
++#define MAX_CPU_CLUSTERS               1
++
++#define CORE_NCTRS                     8 /* Placeholder; KPC is not enabled for this target */
++
++#endif  /* ARM64_BOARD_CONFIG_UMI */
+ 
+ #ifdef ARM64_BOARD_CONFIG_VMAPPLE
+ #include <pexpert/arm64/VMAPPLE.h>
