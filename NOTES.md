@@ -1,8 +1,47 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## Agent handoff / active work (2026-10-15, latest)
+## Agent handoff / active work (2026-10-20, Xiaomi Mi 10 `umi` port)
 
-### >>> UPDATE 2026-10-18 (read first, then the 10-17 handoff below) <<<
+### >>> UPDATE 2026-10-20 (read first; `sweet` history below is unchanged) <<<
+
+**GOAL:** port the working iOS 16.7 `sweet` bring-up to the Xiaomi Mi 10 (`umi`, SM8250 / Snapdragon 865), keeping iPhone X (`iPhone10,3` / D22AP) identity and userland, and preserving all `sweet` support.
+
+**STATE:** `umi` kernel/shim support is written but **never built by CI and never booted on hardware**. There is no Mi 10 boot log or flashable image in the repo yet. `sweet` remains the last tested configuration (home screen, touch, buttons, display).
+
+**What was added (working tree `/home/jopvan/ios-sm8250`, no commit/push yet at the time of this note):**
+- `xnu/patches/0082-umi-board.patch` (new, 14 files) on top of `0001`–`0081`. It adds `MACHINE_CONFIG=UMI` (`ARM64_BOARD_CONFIG_UMI`), and the build also defines `ARM64_BOARD_CONFIG_SWEET` so every existing shared implementation file still compiles.
+- `config/MASTER.arm64.umi` (copy of the `sweet` generic bring-up config), `pexpert/pexpert/arm64/UMI.h`, `makedefs/MakeInc.def` (UMI is plain `arm64`, not `arm64e`), and UMI branches in `bsd/dev/sweet_keys.c`, `bsd/dev/sweet_touch.c`, `bsd/dev/sweet_usb.c`, `iokit/Kernel/arm/SweetFramebuffer.cpp`, `iokit/Kernel/arm/hid/SweetHID.cpp`, `osfmk/arm64/start.s`, `osfmk/arm64/sweet_early.c`, `pexpert/pexpert/arm64/board_config.h`, and the libpthread/HFS/BearSSL Makefiles.
+- `xnu/patches/0019`, `0020`, `0026` staging scripts accept `MACHINE_CONFIG=UMI`.
+- `tools/mkadt.py` learned `--board sweet|umi`; UMI uses the iPhone X canvas 1125×2436, native fb 1080×2340, timer INTID 27, Kryo 585 CPU nodes. `--board umi` without `--highmem` is rejected because the SM8250 low bank has a hole at `0xbbb00000`–`0xc0000000`.
+- `shim/build.sh` learned `BOARD=sweet|umi` and `DTB=...` (`BOARD=umi` defaults to `dtb/umi.dtb`, `FB_H=2340`, timer INTIDs 27/30).
+
+**Validation performed locally (2026-10-20):**
+- `0082` was regenerated from a patched XNU tree based on `xnu-8796.141.3 + 0001–0081` (baseline commit `6bbad47`), applied with `git apply --check` to a clean export of that baseline, and the result compared byte-for-byte with the working tree: OK.
+- `tools/mkadt.py --board umi --highmem` output inspected: `dram-base 0x100000000`, `dram-size 0xfcc00000`, `virtual-timer-intid 27`, `canvas 1125×2436`, `sweet-fbcon 1080×2340`, CPU MPIDRs `0x0`–`0x700`, UFS `0x1d84000`.
+- `tools/mkadt.py` default (`sweet`) output still correct; Python files compile.
+- `BOARD=umi DTB=/home/jopvan/umi-work/umi.dtb shim/build.sh` produced `shim/out/shim-boot.img` (1,130,496 bytes). Unpacking it with `tools/unpack_bootv2.py` returned the same 938,369-byte DTB (`cmp` OK), kernel 180,224 bytes, `cmdline console=null`.
+- **Not done:** no XNU compile (no local macOS/Xcode), no GitHub Actions run, no `mkpayload.py` with a real UMI kernel, no flash, no phone boot.
+
+**Mi 10 DTB / hardware facts (from `/home/jopvan/umi-work/umi.dtb`, also copied to ignored `dtb/umi.dtb`):**
+- `model = "Qualcomm Technologies, Inc. xiaomi umi"`, `compatible = qcom,kona-mtp | qcom,kona | qcom,mtp`, 938,369 bytes.
+- Memory: `<0x80000000 0x3bb00000>`, `<0xc0000000 0xc0000000>`, `<0x180000000 0x100000000>` (8 GB sample; contiguous `0xc0000000`–`0x280000000`). The chosen XNU upper bank `0x100000000 + 0xfcc00000` ends at `0x1fcc00000`, inside both this 8 GB map and a 6 GB map ending at `0x200000000`. **No reserved-memory region or `alloc-ranges` above 4 GB**; `cont_splash_region@9c000000` is `0x2300000`, the next carve-out `dfps_data_region@9e300000` starts immediately after.
+- GIC: `interrupt-controller@17a00000`, GICR `0x17a60000`, redistributor stride `0x20000`; timer interrupts `<GIC_PPI 13>`, `<14>`, `<11>`, so CNTV is INTID 27.
+- Display/touch: panel 1080×2340; FTS at `0x49` on `i2c@a94000` (SE13 / `GCC_QUPV3_WRAP1_S5`), `fts,x-max=1080`, `fts,y-max=2340`; IRQ GPIO39 flags `0x2008`, reset GPIO38, SDA/SCL 36/37, `touch_vddio_vreg` GPIO69 (enable-active-high). Goodix GT9889 at `0x5d` on the same bus.
+- Keys: PM8150 PON SID0 PPID `0x008` (power, volume-down); PM8150 GPIO6 PPID `0x00c5` (volume-up).
+- UFS: `ufshc@1d84000`, reg size `0x3000`, IRQ 265, `ufsphy_mem@1d87000`; the existing polled UFS driver is reused.
+- USB: DWC3 `0xa600000`, QSCRATCH `0xa6f8800`, HS PHY `hsphy@88e3000` (not `0x88e2000`); `usb30_prim` GDSC is `0x10f004` (not `0xf004`), master/sleep/utmi CBCRs `0xf010/0xf018/0xf01c`, cfg/aggre `0xf07c/0xf080`, clkref `0x8c010`. `0082` now carries these UMI offsets.
+- Touch clock correction: `GCC_QUPV3_WRAP1_S5_CLK` enable is `0x52008` bit 27 (not `0x5200c`); UMI RCG `0x18600`, halt `0x185fc`, wrapper1 core/core_2x halt `0x23138`/`0x23140`, m/s AHB halt `0x18004`/`0x18008`.
+
+**Important:** the DTB memory node is patched by ABL, so the sample above describes the 8 GB phone it came from; the conservative upper-bank choice is valid for 6/8/12 GB variants, but this has not been proven on a 6 GB unit.
+
+**NEXT CONCRETE STEPS:**
+1. Commit the three logical groups: (a) `0082` + UMI staging scripts, (b) `tools/mkadt.py` + shim `BOARD=umi`, (c) README/NOTES. Push to `main`.
+2. Dispatch GitHub Actions `xnu.yml` with `machine_config=UMI`; download `xnu-kernel` and confirm `kernel.development.umi` exists. Fix compile errors in `0082` if any (most likely candidates: the USB offset block, or `#if defined(UMI)` visibility in files that do not include `board_config.h`).
+3. Build `shim/out/umi.adt` (`--board umi --highmem`), `mkpayload.py ... kernel.development.umi`, and `BOARD=umi DTB=dtb/umi.dtb shim/build.sh`.
+4. Hardware test order: `fastboot boot` with `cpus=1`, `sweetfb_noconsole=0` first (or no `sweetfb_noconsole`) to see the early console; then check timer/heartbeat, UFS root, touch probe (`SWEET TOUCH: SE13 ... chip-id`), keys. Only after the kernel is stable, flash the HFS+ userdata image (destructive — require explicit user confirmation).
+5. If FTS probe fails, verify SE13 GENI firmware/clock and the `0x49` address with the vendor FTS protocol; Goodix GT9889 at `0x5d` is the fallback.
+
+### >>> UPDATE 2026-10-18 (previous `sweet` handoff) <<<
 
 **STATE at end of 2026-10-18 (evening):**
 - On the phone: userdata = **image v15** (`/run/media/dipa/android/ios-sweet-ipsw/ios16-root-20H392-v15.img/.simg`; = v14 + `/private/var/preferences/SystemConfiguration/preferences.plist` with one network service "USB Ethernet": Interface DeviceName ue0 Type Ethernet, IPv4 Manual 192.168.7.2/24 router 192.168.7.1, DNS 1.1.1.1 8.8.8.8, set "Automatic" as CurrentSet). Fallback image v14 (v12/v13 deleted).
