@@ -1273,7 +1273,7 @@ new file mode 100644
 index 0000000..c3201ea
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/UMI.h
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,86 @@
 +/*
 + * Board config for the Xiaomi Mi 10 ("umi", Qualcomm SM8250 /
 + * Snapdragon 865): Kryo 585 = one Cortex-A77 prime, three Cortex-A77
