@@ -91,7 +91,7 @@ index a148608..0dcf8f9 100644
  	}
  	if (!pok && !gok) {
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 03defe6..c90f077 100644
+index 03defe6..58cb2c3 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -1,9 +1,12 @@
@@ -170,7 +170,7 @@ index 03defe6..c90f077 100644
  #define TOUCH_GOODIX     1
  #define TOUCH_FTS        2
  /* GT9896 is Yellowstone in Xiaomi sweet-r-oss, not the Berlin protocol. */
-@@ -136,8 +173,8 @@ touch_gpio(unsigned pin, unsigned mux, unsigned pull, unsigned drive, bool out,
+@@ -136,13 +173,27 @@ touch_gpio(unsigned pin, unsigned mux, unsigned pull, unsigned drive, bool out,
  static bool
  touch_clocks(void)
  {
@@ -181,7 +181,26 @@ index 03defe6..c90f077 100644
  	touch_wr(st.gcc, TOUCH_GCC_VOTE, touch_rd(st.gcc, TOUCH_GCC_VOTE) | mask);
  	uint32_t dfs = touch_rd(st.gcc, TOUCH_RCG + 0x14u);
  	uint32_t cfg = touch_rd(st.gcc, TOUCH_RCG + 4u);
-@@ -160,7 +197,17 @@ touch_clocks(void)
+ 	printf("SWEET TOUCH: gcc vote=%#x rcg=%#x cfg=%#x dfs=%#x\n",
+ 	    touch_rd(st.gcc, TOUCH_GCC_VOTE), touch_rd(st.gcc, TOUCH_RCG), cfg, dfs);
++#if defined(UMI)
++	/*
++	 * A warm reboot (for example from TWRP) can leave SE13's RCG in DFS
++	 * mode with a level-0 parent that is not running. The branch halt
++	 * checks then pass while the SE itself is unclocked, and the first SE
++	 * register read stalls the interconnect (the display freezes too).
++	 * Hand control back to the CFG/MND path and use XO/1 explicitly.
++	 */
++	if (dfs & 1u) {
++		touch_wr(st.gcc, TOUCH_RCG + 0x14u, dfs & ~1u);
++		dfs = touch_rd(st.gcc, TOUCH_RCG + 0x14u);
++		printf("SWEET TOUCH: DFS disabled (ctrl now %#x), using XO/1\n", dfs);
++	}
++#endif
+ 	if (dfs & 1u) {
+ 		/* SE CLK_SEL=0 selects DFS performance level 0. Do not alter tables. */
+ 		cfg = touch_rd(st.gcc, TOUCH_RCG + 0x1cu);
+@@ -160,7 +211,17 @@ touch_clocks(void)
  			return false;
  		}
  	}
@@ -200,7 +219,7 @@ index 03defe6..c90f077 100644
  	for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); ++i) {
  		if (!touch_wait_clear(st.gcc, branches[i], 1u << 31)) {
  			printf("SWEET TOUCH: GCC branch %#x halted (%#x)\n", branches[i],
-@@ -425,7 +472,7 @@ touch_goodix(void)
+@@ -425,7 +486,7 @@ touch_goodix(void)
  		unsigned px = touch_be16(p + 2), py = touch_be16(p + 4);
  		/* Low nibble 1/3 denotes pen data in the vendor parser. */
  		if ((p[0] & 15u) == 1u || (p[0] & 15u) == 3u || id >= TOUCH_MAX ||
@@ -209,7 +228,7 @@ index 03defe6..c90f077 100644
  			(void)touch_goodix_ack();
  			return EIO;
  		}
-@@ -446,7 +493,7 @@ touch_focaltech(void)
+@@ -446,7 +507,7 @@ touch_focaltech(void)
  	uint8_t buf[63];
  	int x[TOUCH_MAX] = {0}, y[TOUCH_MAX] = {0};
  	uint32_t mask = 0, seen = 0;
@@ -218,7 +237,7 @@ index 03defe6..c90f077 100644
  	if (err) {
  		return err;
  	}
-@@ -472,7 +519,7 @@ touch_focaltech(void)
+@@ -472,7 +533,7 @@ touch_focaltech(void)
  		}
  		unsigned px = ((unsigned)(p[0] & 15u) << 8) | p[1];
  		unsigned py = ((unsigned)(p[2] & 15u) << 8) | p[3];
@@ -227,9 +246,11 @@ index 03defe6..c90f077 100644
  			return EIO;
  		}
  		mask |= 1u << id;
-@@ -492,6 +539,20 @@ touch_se_init(void)
+@@ -491,7 +552,22 @@ static bool
+ touch_se_init(void)
  {
  	uint32_t fw = touch_rd(st.se, SE_FW);
++	printf("SWEET TOUCH: SE13 fw readable (%#x)\n", fw);
  	uint32_t tx = touch_rd(st.se, SE_HW_TX), rx = touch_rd(st.se, SE_HW_RX);
 +	uint32_t fifo_if = touch_rd(st.se, 0x2008);
 +	if (touch_rd(st.se, 0x64) & 1u) {
@@ -248,7 +269,7 @@ index 03defe6..c90f077 100644
  	printf("SWEET TOUCH: se7 fw=%#x proto=%u status=%#x tx=%#x rx=%#x ios=%#x\n",
  	    fw, (fw >> 8) & 0xffu, touch_rd(st.se, SE_STATUS), tx, rx,
  	    touch_rd(st.se, 0x908));
-@@ -558,9 +619,9 @@ touch_thread(void *arg, wait_result_t result)
+@@ -558,36 +634,47 @@ touch_thread(void *arg, wait_result_t result)
  	(void)PE_parse_boot_argn("sweettouchdelay", &delay_s, sizeof(delay_s));
  	printf("SWEET TOUCH: starting in %u s\n", delay_s);
  	touch_wait(delay_s * 1000u);
@@ -260,8 +281,14 @@ index 03defe6..c90f077 100644
  	st.se = ml_io_map(TOUCH_SE_PA, 0x4000);
  	if (!st.gcc || !st.gpio || !st.se) {
  		printf("SWEET TOUCH: MMIO mapping failed\n");
-@@ -569,25 +630,32 @@ touch_thread(void *arg, wait_result_t result)
- 	if (!touch_clocks() || !touch_se_init()) {
+ 		goto out;
+ 	}
+-	if (!touch_clocks() || !touch_se_init()) {
++	if (!touch_clocks()) {
++		goto out;
++	}
++	printf("SWEET TOUCH: clocks ready; reading SE13 registers\n");
++	if (!touch_se_init()) {
  		goto out;
  	}
 -	printf("SWEET TOUCH: TLMM reset=%#x irq=%#x vdd90=%#x; voting L11C through RPMh\n",
@@ -304,7 +331,7 @@ index 03defe6..c90f077 100644
  	touch_wait(300); /* exceeds vendor 5 ms test + 95 ms post-test wait */
  	uint8_t gid[32], legacy[32], fid1 = 0, fid2 = 0;
  	st.probing = true;
-@@ -595,10 +663,10 @@ touch_thread(void *arg, wait_result_t result)
+@@ -595,10 +682,10 @@ touch_thread(void *arg, wait_result_t result)
  	printf("SWEET TOUCH: probe 0x5d err=%d pid=%02x%02x%02x%02x fw=%02x.%02x.%02x.%02x irq=%#x\n",
  	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
  	(void)touch_probe_info(0x8240, legacy);
@@ -319,7 +346,7 @@ index 03defe6..c90f077 100644
  	st.probing = false;
  	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
  	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
-@@ -608,12 +676,13 @@ touch_thread(void *arg, wait_result_t result)
+@@ -608,12 +695,13 @@ touch_thread(void *arg, wait_result_t result)
  		goto out;
  	}
  	st.kind = goodix ? TOUCH_GOODIX : TOUCH_FTS;
