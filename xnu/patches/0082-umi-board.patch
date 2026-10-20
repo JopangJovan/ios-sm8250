@@ -586,6 +586,40 @@ index 27bc49d..682dcf0 100644
  	}
  
  	collection = IOHIDEvent::digitizerEvent(now, 0, kIOHIDDigitizerTransducerTypeHand, false, 0, 0, 0);
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index 92f3e26..7767ec4 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -32,19 +32,27 @@
+  * Version 2.0.
+  */
+ 
++#if defined(ARM64_BOARD_CONFIG_UMI)
++#define SWEET_PLATFORM_COMPAT	"xiaomi,umi"
++#define SWEET_CPU_COMPAT	"qcom,kryo585"
++#else
++#define SWEET_PLATFORM_COMPAT	"xiaomi,sweet"
++#define SWEET_CPU_COMPAT	"qcom,kryo470"
++#endif
++
+ const char * gIOKernelConfigTables =
+     "("
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+     "   {"
+     "     'IOClass'         = SweetPlatformExpert;"
+     "     'IOProviderClass' = IOPlatformExpertDevice;"
+-    "     'IONameMatch'     = 'xiaomi,sweet';"
++    "     'IONameMatch'     = '" SWEET_PLATFORM_COMPAT "';"
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
+     "   {"
+     "     'IOClass'         = SweetCPU;"
+     "     'IOProviderClass' = IOPlatformDevice;"
+-    "     'IONameMatch'     = 'qcom,kryo470';"
++    "     'IONameMatch'     = '" SWEET_CPU_COMPAT "';"
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
+     "   {"
 diff --git a/libkern/conf/Makefile.template b/libkern/conf/Makefile.template
 index aca295c..e46e633 100644
 --- a/libkern/conf/Makefile.template
