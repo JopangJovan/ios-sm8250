@@ -6,7 +6,14 @@
 
 **GOAL:** port the working iOS 16.7 `sweet` bring-up to the Xiaomi Mi 10 (`umi`, SM8250 / Snapdragon 865), keeping iPhone X (`iPhone10,3` / D22AP) identity and userland, and preserving all `sweet` support.
 
-**STATE:** `umi` kernel/shim support is written but **never built by CI and never booted on hardware**. There is no Mi 10 boot log or flashable image in the repo yet. `sweet` remains the last tested configuration (home screen, touch, buttons, display).
+**STATE (2026-10-20):** `umi` XNU support is written, committed and pushed (`fdc2e53`, `1cb5f9c`, `a11b4fa`). The UMI **shim has now booted on real Mi 10 hardware** (temporary `fastboot boot`, nothing flashed): red panel console with `SHIM`/`LOADER` lines and the read-only UFS probe (UFSHCI registers + SCSI TUR/CAP/READ + MBR/GPT) all ran. The XNU kernel itself is still being built by CI (run `39361017192`, `machine_config=UMI`); no `kernel.development.umi` and no flashable UMI image yet. `sweet` remains the last full iOS-16.7 boot (home screen, touch, buttons, display).
+
+**Validated on the real Mi 10 (2026-10-20, `adb` shell is already root; live FDT `/sys/firmware/fdt` is byte-identical to `dtb/umi.dtb`, sha256 `e48ef15f…`):**
+- Unit is `M2001J2G`, `hwversion 2.19.0`, `hwlevel MP`, `MemTotal 7775284 kB` (~8 GB), `soc_id 356` (SM8250), boot device `1d84000.ufshc`, USB controller `a600000.dwc3`.
+- `/proc/iomem` confirms the SM8250 memory shape: low RAM ends near `0xb0400000` with the hole `0xbbb00000`–`0xc0000000`, then `0xc0000000`–`0xffbfffff`, a 128 KiB reserved gap at `0xffc00000`–`0xffc1ffff`, and high System RAM `0xffc20000`–`0x27fffffff`. The chosen XNU upper bank `0x100000000 + 0xfcc00000` (ends `0x1fcc00000`) sits entirely inside that high RAM.
+- Arch timer is GIC **INTID 27** (`arch_timer`, live `/proc/interrupts` shows "GICv3 27 Level arch_timer").
+- Touch: `fts` is bound at `3-0049` on `i2c@a94000` (driver `fts`, input `fts`, IRQ `msmgpio 39` = live and counting). Goodix `gt9889` also enumerates at `3-005d` (driver `gtx8`) but **has no IRQ and no input device**, so FTS is the active controller (confirms the `0x49` choice; GT9889 stays the fallback).
+- Panel `1080x2340` (`card0-DSI-1`), GPU `Adreno650v3`. `fastboot` host tools present, `product: umi`, `unlocked: yes`.
 
 **What was added (working tree `/home/jopvan/ios-sm8250`, no commit/push yet at the time of this note):**
 - `xnu/patches/0082-umi-board.patch` (new, 14 files) on top of `0001`–`0081`. It adds `MACHINE_CONFIG=UMI` (`ARM64_BOARD_CONFIG_UMI`), and the build also defines `ARM64_BOARD_CONFIG_SWEET` so every existing shared implementation file still compiles.
@@ -35,11 +42,12 @@
 **Important:** the DTB memory node is patched by ABL, so the sample above describes the 8 GB phone it came from; the conservative upper-bank choice is valid for 6/8/12 GB variants, but this has not been proven on a 6 GB unit.
 
 **NEXT CONCRETE STEPS:**
-1. Commit the three logical groups: (a) `0082` + UMI staging scripts, (b) `tools/mkadt.py` + shim `BOARD=umi`, (c) README/NOTES. Push to `main`.
-2. Dispatch GitHub Actions `xnu.yml` with `machine_config=UMI`; download `xnu-kernel` and confirm `kernel.development.umi` exists. Fix compile errors in `0082` if any (most likely candidates: the USB offset block, or `#if defined(UMI)` visibility in files that do not include `board_config.h`).
+1. ~~Commit the three logical groups and push to `main`.~~ **DONE** (`fdc2e53`, `1cb5f9c`, `a11b4fa`).
+2. **IN PROGRESS:** GitHub Actions `xnu.yml` run `39361017192` (`machine_config=UMI`) is compiling. Download the `xnu-kernel` artifact and confirm `kernel.development.umi` exists. Fix compile errors in `0082` if any (most likely candidates: the USB offset block, or `#if defined(UMI)` visibility in files that do not include `board_config.h`).
 3. Build `shim/out/umi.adt` (`--board umi --highmem`), `mkpayload.py ... kernel.development.umi`, and `BOARD=umi DTB=dtb/umi.dtb shim/build.sh`.
 4. Hardware test order: `fastboot boot` with `cpus=1`, `sweetfb_noconsole=0` first (or no `sweetfb_noconsole`) to see the early console; then check timer/heartbeat, UFS root, touch probe (`SWEET TOUCH: SE13 ... chip-id`), keys. Only after the kernel is stable, flash the HFS+ userdata image (destructive — require explicit user confirmation).
 5. If FTS probe fails, verify SE13 GENI firmware/clock and the `0x49` address with the vendor FTS protocol; Goodix GT9889 at `0x5d` is the fallback.
+6. ~~Boot the UMI shim on hardware.~~ **DONE 2026-10-20:** `fastboot boot shim/out/shim-boot.img` (BOARD=umi, no payload) ran on the Mi 10 — red panel console, `SHIM`/`LOADER` lines, UFS probe all OK. This proves the UMI panel `0x9c000000`/`1080x2340`, GIC, arch timer and UFS paths before the kernel exists.
 
 ### >>> UPDATE 2026-10-18 (previous `sweet` handoff) <<<
 
