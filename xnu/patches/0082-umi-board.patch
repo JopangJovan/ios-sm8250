@@ -310,6 +310,33 @@ index 03defe6..e37dbb7 100644
  		    (++ticks % 10u) == 0) {
  			int err = st.kind == TOUCH_GOODIX ? touch_goodix() : touch_focaltech();
  			if (err) {
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+index 6b926fe..c5fa61b 100644
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -634,6 +634,22 @@ sweet_ufs_init(void)
+ 	}
+ 	lck_mtx_unlock(&sweet_ufs_lock);
+ 	if (error) {
++		/*
++		 * Bring-up fallback: without a root partition there is no boot
++		 * media, but the input and USB drivers do not depend on one.
++		 * sweetbringup=1 starts them anyway, so the UMI FTS touch and
++		 * the USB live-log channel can be validated before the iOS
++		 * root image exists.
++		 */
++		uint32_t bringup = 0;
++		PE_parse_boot_argn("sweetbringup", &bringup, sizeof(bringup));
++		if (bringup) {
++			printf("SWEET UFS: no \"%s\" partition; sweetbringup starts input/USB anyway\n",
++			    want);
++			sweet_keys_init();
++			sweet_touch_init();
++			sweet_usb_probe();
++		}
+ 		return error;
+ 	}
+ 
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 index b6c1a41..c137bd2 100644
 --- a/bsd/dev/sweet_usb.c
