@@ -91,7 +91,7 @@ index a148608..0dcf8f9 100644
  	}
  	if (!pok && !gok) {
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 03defe6..f29e9ab 100644
+index 03defe6..188ed38 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -1,9 +1,12 @@
@@ -246,7 +246,7 @@ index 03defe6..f29e9ab 100644
  			return EIO;
  		}
  		mask |= 1u << id;
-@@ -491,11 +552,37 @@ static bool
+@@ -491,11 +552,42 @@ static bool
  touch_se_init(void)
  {
  	uint32_t fw = touch_rd(st.se, SE_FW);
@@ -263,16 +263,21 @@ index 03defe6..f29e9ab 100644
 +	printf("SWEET TOUCH: if_disable=%#x\n", ifdis);
 +	if (ifdis & 1u) {
 +		/*
-+		 * UMI's ABL leaves SE13 in GSI/DMA mode, so the FIFO interface
-+		 * is disabled (GENI_IF_DISABLE_RO.FIFO_IF_DISABLE). Linux
-+		 * switches an SE to FIFO mode by clearing SE_FIFO_IF_DISABLE
-+		 * (0x2008 bit 0) and GENI_DMA_MODE_EN. Do that before probing;
-+		 * sweet's ABL already leaves the FIFO interface enabled.
++		 * UMI's ABL (and TWRP) run SE13 in GSI mode, which disables
++		 * the FIFO interface. Take the engine out of GSI/DMA mode and
++		 * select the serial clock before touching the FIFO config
++		 * registers: Linux does the same in geni_load_se_fw(), and
++		 * with SER_CLK_SEL clear the DFE block is unclocked, so a
++		 * 0x2008 read stalls the whole interconnect.
 +		 */
++		touch_wr(st.se, 0xe18, 0);  /* no GSI events */
++		touch_wr(st.se, 0xe1c, 0);  /* mask GSI IRQ routing */
++		touch_wr(st.se, SE_DMA, 0); /* SE_GENI_DMA_MODE_EN: FIFO mode */
++		printf("SWEET TOUCH: GSI off; selecting serial clock\n");
++		touch_wr(st.se, 0x2000, 1u); /* SE_GENI_CLK_CTRL.SER_CLK_SEL */
 +		printf("SWEET TOUCH: reading fifo_if_disable (0x2008)\n");
 +		uint32_t fifo_if = touch_rd(st.se, 0x2008);
 +		printf("SWEET TOUCH: fifo_if_disable=%#x\n", fifo_if);
-+		touch_wr(st.se, SE_DMA, 0);
 +		touch_wr(st.se, 0x2008, fifo_if & ~1u);
 +		printf("SWEET TOUCH: FIFO enabled -> 0x2008=%#x 0x64=%#x\n",
 +		    touch_rd(st.se, 0x2008), touch_rd(st.se, 0x64));
@@ -286,7 +291,7 @@ index 03defe6..f29e9ab 100644
  	    ((tx >> 24) & 0x3fu) != 32u || ((rx >> 24) & 0x3fu) != 32u ||
  	    ((tx >> 16) & 0x3fu) < 2u || ((rx >> 16) & 0x3fu) < 2u) {
  		printf("SWEET TOUCH: need ABL-loaded I2C firmware and 32-bit FIFOs; probes skipped\n");
-@@ -558,36 +645,47 @@ touch_thread(void *arg, wait_result_t result)
+@@ -558,36 +650,47 @@ touch_thread(void *arg, wait_result_t result)
  	(void)PE_parse_boot_argn("sweettouchdelay", &delay_s, sizeof(delay_s));
  	printf("SWEET TOUCH: starting in %u s\n", delay_s);
  	touch_wait(delay_s * 1000u);
@@ -348,7 +353,7 @@ index 03defe6..f29e9ab 100644
  	touch_wait(300); /* exceeds vendor 5 ms test + 95 ms post-test wait */
  	uint8_t gid[32], legacy[32], fid1 = 0, fid2 = 0;
  	st.probing = true;
-@@ -595,10 +693,10 @@ touch_thread(void *arg, wait_result_t result)
+@@ -595,10 +698,10 @@ touch_thread(void *arg, wait_result_t result)
  	printf("SWEET TOUCH: probe 0x5d err=%d pid=%02x%02x%02x%02x fw=%02x.%02x.%02x.%02x irq=%#x\n",
  	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
  	(void)touch_probe_info(0x8240, legacy);
@@ -363,7 +368,7 @@ index 03defe6..f29e9ab 100644
  	st.probing = false;
  	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && gid[3] == '6';
  	bool fts = !fe1 && !fe2 && fid1 == 0x54 && fid2 == 0x52;
-@@ -608,12 +706,13 @@ touch_thread(void *arg, wait_result_t result)
+@@ -608,12 +711,13 @@ touch_thread(void *arg, wait_result_t result)
  		goto out;
  	}
  	st.kind = goodix ? TOUCH_GOODIX : TOUCH_FTS;
