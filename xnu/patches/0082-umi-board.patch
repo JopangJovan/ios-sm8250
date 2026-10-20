@@ -773,10 +773,10 @@ index c7d274f..d9c8153 100644
  # Headers installed into System.framework/PrivateHeaders (userspace internal SDK only).
 diff --git a/pexpert/pexpert/arm64/UMI.h b/pexpert/pexpert/arm64/UMI.h
 new file mode 100644
-index 0000000..f3e5c77
+index 0000000..339f11e
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/UMI.h
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,84 @@
 +/*
 + * Board config for the Xiaomi Mi 10 ("umi", Qualcomm SM8250 /
 + * Snapdragon 865): Kryo 585 = one Cortex-A77 prime, three Cortex-A77
@@ -833,7 +833,12 @@ index 0000000..f3e5c77
 +#define UMI_TOUCH_GCC_VOTE        0x00052008
 +#define UMI_TOUCH_GCC_MASK        ((0x0fu << 18) | (1u << 27))
 +#define UMI_TOUCH_GPIO_PHYS       0x0f000000
-+#define UMI_TOUCH_GPIO_SIZE       0x01000000
++/*
++ * Only the per-pin pages up to GPIO 69 (0x46000) are ever accessed.  The
++ * full 16 MiB TLMM window cannot be mapped: ml_io_map() allocates from the
++ * fixed 8 MiB io_submap and panics when it does not fit.
++ */
++#define UMI_TOUCH_GPIO_SIZE       0x00080000
 +#define UMI_TOUCH_SDA_GPIO        36
 +#define UMI_TOUCH_SCL_GPIO        37
 +#define UMI_TOUCH_RESET_GPIO      38
