@@ -1,0 +1,97 @@
+From 9e7ac286cfbae45a80c654d1dfbe6961b1d3f597 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Wed, 21 Oct 2026 20:40:50 +0700
+Subject: [PATCH] umi: test FTS521 scan without calibration and trace FIFO
+ events
+
+---
+ bsd/dev/sweet_touch.c | 38 +++++++++++++++++++++++++++-----------
+ 1 file changed, 27 insertions(+), 11 deletions(-)
+
+diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
+index 37d29d6..3860c6d 100644
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -697,8 +697,15 @@ static int
+ umi_fts_initialize(void)
+ {
+ 	static const uint8_t reset[] = {0xfa, 0x20, 0x00, 0x00, 0x24, 0x80};
+-	static const uint8_t sense_on[] = {0xa0, 0x00, 0x01};
+-	static const uint8_t sense_off[] = {0xa0, 0x00, 0x00};
++	/* FTS521 vendor Screen ON/FOD path supports 0x20 (no calibration).
++	 * Keep the selection in boot args so both supported modes can be tested
++	 * without rebuilding. Do not stop sensing between reset and this command. */
++	unsigned scan = 0x20;
++	(void)PE_parse_boot_argn("umifts_scan", &scan, sizeof(scan));
++	if (scan != 0x01 && scan != 0x20) {
++		return EINVAL;
++	}
++	const uint8_t sense_on[] = {0xa0, 0x00, (uint8_t)scan};
+ 	static const uint8_t gestures[] = {0xa2, 0x03, 0x00, 0x00, 0x00, 0x03};
+ 	static const uint8_t chipid[] = {0xfa, 0x20, 0x00, 0x00, 0x00};
+ 	uint8_t event[8], id[4] = {0};
+@@ -724,25 +731,25 @@ umi_fts_initialize(void)
+ 		    id[0], id[1], id[2], id[3]);
+ 		return ENXIO;
+ 	}
+-	/* Mirror fts_init_sensing() with CONFIG_TOUCHSCREEN_FOD. */
++	/* Enable the controller's active scan and supported gesture mask. */
+ 	if (umi_fts_xfer(sense_on, sizeof(sense_on), NULL, 0) ||
+-	    umi_fts_xfer(gestures, sizeof(gestures), NULL, 0) ||
+-	    umi_fts_xfer(sense_off, sizeof(sense_off), NULL, 0)) {
+-		return EIO;
+-	}
+-	touch_wait(50);
+-	if (umi_fts_xfer(sense_on, sizeof(sense_on), NULL, 0)) {
++	    umi_fts_xfer(gestures, sizeof(gestures), NULL, 0)) {
+ 		return EIO;
+ 	}
+ 	touch_wait(100);
+-	umi_fts_drain();
+-	printf("UMI FTS: ST FTS521 %02x%02x initialized\n", id[0], id[1]);
++	/* Leave command/status events for the logged event loop below. */
++	printf("UMI FTS: ST FTS521 %02x%02x initialized scan=%#x\n", id[0], id[1], scan);
+ 	return 0;
+ }
+ 
+ static void
+ umi_fts_event(const uint8_t event[8])
+ {
++	static unsigned logged;
++	if (logged++ < 48) {
++		printf("UMI FTS: event %02x %02x %02x %02x %02x %02x %02x %02x\n",
++		    event[0], event[1], event[2], event[3], event[4], event[5], event[6], event[7]);
++	}
+ 	unsigned type = event[0], id = (event[1] >> 4) & 0x0fu;
+ 	if (id >= TOUCH_MAX) {
+ 		return;
+@@ -808,10 +815,12 @@ umi_touch_run(void)
+ 		printf("UMI FTS: initialization failed\n");
+ 		return;
+ 	}
++	unsigned ticks = 0, events = 0, errors = 0;
+ 	while (!st.dead) {
+ 		if (!umi_fts_fifo(event)) {
+ 			unsigned count = event[7] & 0x1fu;
+ 			if (event[0]) {
++				++events;
+ 				umi_fts_event(event);
+ 			}
+ 			for (unsigned i = 0; i < count && i < 31; ++i) {
+@@ -820,6 +829,13 @@ umi_touch_run(void)
+ 				}
+ 				umi_fts_event(event);
+ 			}
++		} else {
++			++errors;
++		}
++		if (++ticks % 625u == 0) {
++			printf("UMI FTS: poll=%u events=%u errors=%u irq=%u active=%#x\n",
++			    ticks, events, errors,
++			    touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_IRQ)) & 1u, st.active);
+ 		}
+ 		touch_wait(8);
+ 	}
+-- 
+2.56.0
+

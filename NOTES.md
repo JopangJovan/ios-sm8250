@@ -2,6 +2,16 @@
 
 ## Touch failure and CI optimization follow-up
 
+- VDD test failed to produce usable touch, but log
+  `logs/clean-touch-vdd-failed.txt` proves progress: RPMh TCS0 completes,
+  ldoc1 vote errno=0, SDA/SCL now 1/1, ST FTS521 chip ID 3639 initializes.
+  Missing supply was a real blocker. Remaining scan/event/HID issue unknown.
+- New independent patch 0085 tests vendor-supported active setting 0x20
+  (without calibration), removes sense-off/on cycling, and traces first 48
+  FIFO events plus periodic event/error/IRQ counters. `umifts_scan=1` selects
+  calibrated mode without another kernel build. No firmware flash/calibration
+  storage writes are performed.
+
 - Supply test run `39608458872` / `4c40080` passed. Kernel artifact
   `12349168412` downloaded to `xnu/out-touch-vdd` and checksum verified.
   Image `shim/out/shim-boot-umi-touch-vdd.img` SHA-256
