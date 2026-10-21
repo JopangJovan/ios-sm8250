@@ -765,7 +765,7 @@ index 0000000..f3e5c77
 +#define SWEET_VTIMER_INTID        27
 +
 +/*
-+ * Touch: FocalTech FTS at 0x49 on QUPv3 SE13 (wrapper1 local S5,
++ * Touch: STMicroelectronics FTS at 0x49 on QUPv3 SE13 (wrapper1 local S5,
 + * 0xa94000), SDA/SCL TLMM 36/37, reset 38, IRQ 39, 3.3 V enable 69.
 + * The 1.8 V rail is PM8150A L1 (left enabled by firmware for now).
 + */
@@ -774,8 +774,8 @@ index 0000000..f3e5c77
 +#define UMI_TOUCH_GCC_HALT        0x000185fc
 +#define UMI_TOUCH_GCC_VOTE        0x00052008
 +#define UMI_TOUCH_GCC_MASK        ((0x0fu << 18) | (1u << 27))
-+#define UMI_TOUCH_GPIO_PHYS       0x0f000000
-+#define UMI_TOUCH_GPIO_SIZE       0x01000000
++#define UMI_TOUCH_GPIO_PHYS       0x0f500000
++#define UMI_TOUCH_GPIO_SIZE       0x00080000
 +#define UMI_TOUCH_SDA_GPIO        36
 +#define UMI_TOUCH_SCL_GPIO        37
 +#define UMI_TOUCH_RESET_GPIO      38

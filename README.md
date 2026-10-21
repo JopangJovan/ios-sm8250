@@ -158,6 +158,15 @@ python3 tools/mkpayload.py xnu/out/kernel.development.umi shim/out/umi.adt shim/
 BOARD=umi DTB=dtb/umi.dtb shim/build.sh ../shim/out/umi-payload.bin   # -> shim/out/shim-boot.img
 ```
 
+For the safest first boot, use the wrapper below. It starts one CPU and disables
+the still-experimental UMI touch, key and USB drivers while leaving the display,
+UFS root and iOS userland enabled:
+
+```sh
+tools/build-umi-boot.sh xnu/out/kernel.development.umi dtb/umi.dtb
+fastboot boot shim/out/shim-boot-umi-safe.img
+```
+
 The UMI command starts with one CPU and the native 1080×2340 framebuffer. Once the early console and touch are confirmed, increase to `cpus=4` (A55) or `cpus=8` (all cores).
 
 What the less obvious boot-args do:

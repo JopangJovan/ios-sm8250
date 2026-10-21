@@ -1,5 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## UMI clean rebuild handoff (2026-10-21)
+
+- Worktree: `/home/jopvan/ios-sm8250-umi-codex`, branch `umi-rebuild`, based on
+  `CodexGPT6` (`4c7cc91`). The original `/home/jopvan/ios-sm8250` checkout was
+  read only.
+- Integrated only the UMI board/shim/platform commits through patch 0082. The
+  known-broken experimental 0083 touch patch is intentionally excluded.
+- DTB copied from `/home/jopvan/ios-sm8250/dtb/umi.dtb`, SHA-256
+  `e48ef15f2a6320c3b16a93e795e4231f8a693be2798dd1be0a5b9981ad1d046d`.
+- Corrected patch 0082's UMI TLMM mapping to the SOUTH tile at `0x0f500000`
+  with a 512 KiB map. The DTB identifies the controller as ST FTS, not generic
+  FocalTech. Touch remains disabled for the safe boot because protocol support
+  is unfinished.
+- `tools/build-umi-boot.sh` creates a conservative one-CPU image with
+  `sweettouch=0 sweetkeys=0 sweetusb=0`. It does not write userdata or any phone
+  partition.
+- Built artifact: `shim/out/shim-boot-umi-safe.img`, 17,743,872 bytes, SHA-256
+  `a0835af88489cb0114a26a130d4ae262dd25124dac3dab56be3fec224c017444`.
+  Its unpacked ramdisk and DTB compare byte-for-byte with the generated payload
+  and supplied UMI DTB. The ADT includes the copied iPhone X `/product` node.
+- Kernel used for this local image: read-only copy of the existing
+  `kernel.development.umi`, SHA-256
+  `512537fb6f23d2fa2392dc42ba4b77344f43a45550ca1413f7e1b5b1875747af`.
+  This binary contains later experimental code, but the affected drivers are
+  disabled by boot arguments. A fresh 0082-only UMI CI kernel is still desired
+  for strict source/artifact correspondence.
+- Repository validation, shell/Python syntax, ADT dump, boot-image unpack, DTB
+  comparison, and payload comparison pass. No USB device is exposed to this
+  environment, so the final temporary `fastboot boot` hardware test remains.
+
 ## Agent handoff / active work (2026-10-20, Xiaomi Mi 10 `umi` port)
 
 ### >>> UPDATE 2026-10-20 (read first; `sweet` history below is unchanged) <<<
