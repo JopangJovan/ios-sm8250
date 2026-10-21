@@ -158,9 +158,9 @@ python3 tools/mkpayload.py xnu/out/kernel.development.umi shim/out/umi.adt shim/
 BOARD=umi DTB=dtb/umi.dtb shim/build.sh ../shim/out/umi-payload.bin   # -> shim/out/shim-boot.img
 ```
 
-For the safest first boot, use the wrapper below. It starts one CPU and disables
-the still-experimental UMI touch, key and USB drivers while leaving the display,
-UFS root and iOS userland enabled:
+For the current UMI boot, use the wrapper below. It starts all eight CPUs, enables
+the UMI power/volume keys, and disables the still-experimental touch and USB
+drivers while leaving the display, UFS root and iOS userland enabled:
 
 ```sh
 tools/build-umi-boot.sh xnu/out/kernel.development.umi dtb/umi.dtb

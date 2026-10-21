@@ -34,6 +34,11 @@
   `product: umi`, and temporary boot of `shim-boot-umi-safe.img` returned
   `Sending OKAY [0.442s]`, `Booting OKAY [0.103s]`. On-screen XNU/iOS outcome
   is pending observation because the safe image intentionally has USB disabled.
+- Follow-up image at 19:37 WIB enables the UMI key driver (`sweetkeys=1`) and,
+  at user request, all eight CPUs (`cpus=8`); touch and USB remain disabled.
+  SHA-256 is `4b877f8e85ad39a00fd8166410f53b3a71e1a4f43391d2d337f3df0f1fd438a7`.
+  Fastboot again identified `product: umi`; temporary send and boot returned
+  OKAY in 0.434 s and 0.095 s respectively. On-screen key/SMP result pending.
 
 ## Agent handoff / active work (2026-10-20, Xiaomi Mi 10 `umi` port)
 
