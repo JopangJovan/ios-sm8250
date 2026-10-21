@@ -2,6 +2,16 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Warm-cache run `39606835064` / `a5e943f` passed: job 6m19s versus previous
+  cold run approximately 8m30s (user observed 8m33s). KDK restore 30s, host
+  tools 1s, Build 323s versus cold 448s. This is one measured comparison,
+  not a guaranteed duration on future runners.
+- Kernel artifact `12349640690` downloaded to `xnu/out-touch-egpio` and
+  SHA256SUMS verified. Image `shim/out/shim-boot-umi-touch-egpio.img` hash
+  `057ad01d5caad9bafe82ef03926739dee9528d20b62a85ee8f33492fc127a359`.
+  Rebooted from TWRP and temporarily booted for user test. GPIO change is
+  still unverified on hardware; inspect UMI FTS config/idle lines next.
+
 - Diagnostic boot log saved to `logs/clean-touch-diag-failed.txt`: SDA=0 and
   SCL=0 while reset/power read 0x3, first FIFO and reset writes fail at address.
   Thus no FTS protocol exchange succeeded in this build. Vendor pinctrl-kona
