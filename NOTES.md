@@ -2,6 +2,22 @@
 
 ## Agent handoff / active work (2026-10-20, Xiaomi Mi 10 `umi` port)
 
+### >>> UPDATE 2026-10-21 (UMI touch: register-read bug + AVDD power-cycle recovery, commit `55a16f6`) <<<
+
+**What the 0083u3 log (`logs/umi-fts-u3.txt`, boot 13:08:33) actually showed:**
+- Every `probe reg ...` value was FIFO event bytes, not register data (chipid read back `43 01 a0 00` = the scan-on echo; `ier after set=0x43`). **Observation:** the FTI system-register read needs `FA <addr:32>` and the data read in ONE transaction; `touch_fts_hw_read()` sent the address write with a STOP, the controller ignored the lone write, and the following bare read returned FIFO bytes. Fixed by `stretch=true` on the command write (repeated START, same mechanism as the FIFO pointer write). Consequence: all earlier iOS register values were meaningless; the TWRP reference dump (ier `02`, crc `c0`, chipid `36 39 03 00`, fwver `23 01 56 39`) is the first valid comparison target.
+- `poll tick` lines: `avdd=1 rst=1` at all 37 ticks (output latches stayed high; **latch != pad voltage**, now both printed as `avdd=<latch>/<pad>`), 37 sense-on retries all ACKed, zero `0x13/0x23/0x33` events, `display on/off` cycling changed nothing (`sweettouchdelay=90` build also dead, so display state is not the gate).
+- The u3 register dump code also silently consumed FIFO events (broken reads act like FIFO reads); harmless for the diagnosis but explains why only 4 of 37 echo events were logged.
+
+**Device-tree facts that closed two hypotheses (vendor source `kernel-port/xiaomi_sm8250`):**
+- `touch_vddio_vreg` (`xiaomi-sm8250-common.dtsi:103`) is a plain `regulator-fixed` on TLMM 69, `enable-active-high`, **no parent supply, no boot-on**, phandle `0x70b`; its only consumers are the `fts` (`avdd-supply`) and `goodix` (`vtouch-supply`) touch nodes. The display runs off `pm8150_l14` (phandle `0x81`). **Therefore cycling GPIO69 is safe and, since the controller ACKs on iOS while it is driven high, AVDD-as-dead-rail no longer explains the failure - but a real power-on reset (POR) is still the one thing iOS never does** (the vendor gets one at every Android boot because the regulators start disabled).
+- Correcting an earlier note: the **vendor kernel DT does** carry `fts,reset-gpio-enable` + `fts,reset-gpio = <&tlmm 38 0>` (`umi-sm8250.dtsi`). The "no reset-gpio" observation applied to the iOS ADT only. Our reset-pad pulse matches the vendor path.
+- `fts_crc_check` (vendor) = read CRC register -> `fts_systemreset()` -> poll FIFO for CRC error events; nothing beyond a drain, which the TWRP replica already proved sufficient.
+
+**0083 now does (commit `55a16f6`, CI run `39557412441` UMI):** (1) fixed repeated-START register reads, (2) tick line prints `avdd=<latch>/<pad>` `rst=<latch>/<pad>`, (3) after 3 cheap `0x20` retries the fallback escalates to a full **AVDD power-cycle recovery** every 5 s: GPIO69 low -> 100 ms -> chipid read **while AVDD is down** (tells whether the controller runs from vdd/PM8150A L1 alone or dies with AVDD) -> GPIO69 high -> 15 ms -> FTI software reset -> fresh `0x03` -> drain -> `0xa0 00 01` -> IER `0x02` -> register dump (`por<try>` lines in the log). **Guess, tested by the log:** one of the two chipid-while-off outcomes identifies which rail feeds sensing.
+
+**Next:** boot the CI artifact (`fastboot boot`, `sweettouchdelay=10`), tap ~15 s, TWRP -> `tools/sweet-log-pull.sh logs/umi-fts-u4.txt`, then check `por*` chipid outcome, `probe/por reg` vs the TWRP reference (especially `ier`, `crc`, `gpio_*`) and any `evt 13/23/33`. Then trim diagnostics and record the outcome here.
+
 ### >>> UPDATE 2026-10-20 (Touch Screen Root Cause & Fix) <<<
 
 **TOUCHSCREEN ROOT CAUSE & FIX:**
