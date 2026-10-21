@@ -2,6 +2,13 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Scan test run `39610160838` / `65faafe` passed. Artifact `12350451694`
+  downloaded to `xnu/out-touch-scan`; SHA256SUMS passed. Image
+  `shim/out/shim-boot-umi-touch-scan.img` SHA-256
+  `23a94bffec2b309f748745254d4bf505e6d51b2a8991abf369cfd4fe250dc9b1`.
+  Rebooted from TWRP and temporarily booted. Default umifts_scan=0x20,
+  FIFO trace enabled; awaiting user touch test.
+
 - VDD test failed to produce usable touch, but log
   `logs/clean-touch-vdd-failed.txt` proves progress: RPMh TCS0 completes,
   ldoc1 vote errno=0, SDA/SCL now 1/1, ST FTS521 chip ID 3639 initializes.
