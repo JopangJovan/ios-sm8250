@@ -29,6 +29,11 @@
 - Repository validation, shell/Python syntax, ADT dump, boot-image unpack, DTB
   comparison, and payload comparison pass. No USB device is exposed to this
   environment, so the final temporary `fastboot boot` hardware test remains.
+- Hardware send test at 2026-10-21 19:33 WIB: TWRP reported serial `f40df34d`
+  as Xiaomi Mi 10 / `umi`; `adb reboot bootloader` succeeded, fastboot reported
+  `product: umi`, and temporary boot of `shim-boot-umi-safe.img` returned
+  `Sending OKAY [0.442s]`, `Booting OKAY [0.103s]`. On-screen XNU/iOS outcome
+  is pending observation because the safe image intentionally has USB disabled.
 
 ## Agent handoff / active work (2026-10-20, Xiaomi Mi 10 `umi` port)
 
