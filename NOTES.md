@@ -2,6 +2,12 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Hardware-reset run `39614017729` / `ca4257f`: Build step succeeded,
+  artifact `12352600628` checksum passed, stored `xnu/out-touch-hwreset`.
+  Image `shim/out/shim-boot-umi-touch-hwreset.img`, umifts_scan=1, SHA-256
+  `ce4088f84868a1d31b0797b5dc44d99e8f02d09b96de84120c7106e7e61e9509`.
+  Temporarily booted from TWRP; inspect IER versus previous42 on failure.
+
 - Snapshot test failed. `logs/clean-touch-snapshot-failed.txt` shows TWRP
   register snapshot matches XNU except IER: XNU42 versus TWRP02. AFE08/08/08,
   firmware/chipid and GPIO/CRC/ICR agree. No finger events.
