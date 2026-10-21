@@ -2,6 +2,14 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Hardware reset test failed: `logs/clean-touch-hwreset-failed.txt` shows
+  chipid/AFE/supply/transport all good, IER still42, no finger events. Reset
+  selection does not explain IER difference from TWRP02.
+- New 0088 explicitly read-modify-writes only bit0x40 of FTS IER to match
+  measured working recovery state and verifies readback before scan. Preserve
+  all other bits; do not use generic IER_ENABLE=0x41. Functional meaning of
+  bit0x40 is not established; effect on touch remains an experiment.
+
 - Hardware-reset run `39614017729` / `ca4257f`: Build step succeeded,
   artifact `12352600628` checksum passed, stored `xnu/out-touch-hwreset`.
   Image `shim/out/shim-boot-umi-touch-hwreset.img`, umifts_scan=1, SHA-256

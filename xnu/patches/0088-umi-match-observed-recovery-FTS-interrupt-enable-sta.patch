@@ -1,0 +1,41 @@
+From 29a46beb7c1a4a6d918ccee09a819c9e544f378a Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Wed, 21 Oct 2026 21:19:47 +0700
+Subject: [PATCH] umi: match observed recovery FTS interrupt-enable state
+
+---
+ bsd/dev/sweet_touch.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
+index 8ee49cb..0a2dd00 100644
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -752,6 +752,24 @@ umi_fts_initialize(void)
+ 		    id[0], id[1], id[2], id[3]);
+ 		return ENXIO;
+ 	}
++	/* Working UMI recovery reads IER=0x02; our reset boots with 0x42.
++	 * Reproduce only that observed difference, preserving every other bit.
++	 * Do not use generic IER_ENABLE (0x41) from unrelated controller variants. */
++	const uint8_t ier_read[] = {0xfa, 0x20, 0, 0, 0x29};
++	uint8_t ier = 0, verify = 0;
++	if (umi_fts_xfer(ier_read, sizeof(ier_read), &ier, 1)) {
++		return EIO;
++	}
++	const uint8_t ier_write[] = {0xfa, 0x20, 0, 0, 0x29, ier & ~0x40u};
++	if ((ier & 0x40u) && umi_fts_xfer(ier_write, sizeof(ier_write), NULL, 0)) {
++		return EIO;
++	}
++	if (umi_fts_xfer(ier_read, sizeof(ier_read), &verify, 1) ||
++	    verify != (ier & ~0x40u)) {
++		printf("UMI FTS: IER readback failed old=%#x got=%#x\n", ier, verify);
++		return EIO;
++	}
++	printf("UMI FTS: IER vendor-state %#x -> %#x\n", ier, verify);
+ 	/* Enable the controller's active scan and supported gesture mask. */
+ 	if (umi_fts_xfer(sense_on, sizeof(sense_on), NULL, 0) ||
+ 	    umi_fts_xfer(gestures, sizeof(gestures), NULL, 0)) {
+-- 
+2.56.0
+
