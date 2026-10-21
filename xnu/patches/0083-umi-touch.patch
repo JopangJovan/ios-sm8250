@@ -1,8 +1,21 @@
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 2d74a77..8dc5b4d 100644
+index 2d74a77..fafaf0e 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
-@@ -700,7 +700,40 @@ touch_goodix(void)
+@@ -111,10 +111,10 @@ void sweet_touch_init(void);
+ 
+ static struct {
+ 	vm_offset_t se, gcc, gpio, wrap;
+-	bool started, dead, probing, bb;
++	bool started, dead, probing, bb, evt_seen;
+ 	int kind, irq_hint;
+ 	uint32_t irq_status, irq_last, active;
+-	unsigned sent, got;
++	unsigned sent, got, fallback;
+ 	int x[TOUCH_MAX], y[TOUCH_MAX];
+ } st;
+ static int touch_sleep_chan;
+@@ -700,7 +700,53 @@ touch_goodix(void)
   *   Y = (evt[4] << 4) | ((evt[3] & 0xf0) >> 4)
   * Slot ID:
   *   id = (evt[1] >> 4) & 0x0f
@@ -11,15 +24,30 @@ index 2d74a77..8dc5b4d 100644
 + * resets the IC through the FTI system register instead of the reset pad:
 + *   fts_writeU8UX(FTS_CMD_HW_REG_W, BITS_32, ADDR_SYSTEM_RESET, {0x80}, 1)
 + * i.e. FA 20 00 00 24 80, then waits for EVT_ID_CONTROLLER_READY (0x03).
-+ * A reset-pad pulse alone leaves the application firmware running without
-+ * its panel configuration: the FIFO answers status/echo events, but the
-+ * panel never scans.
++ * Reset the same way here, and drain before writing: the reset pad pulse
++ * earlier in the probe already posted its own ready event.
   */
 +static int
 +touch_fts_reset(void)
 +{
 +	static const uint8_t reset_cmd[] = {0xfa, 0x20, 0x00, 0x00, 0x24, 0x80};
-+	int err = touch_msg(TOUCH_FTS_ADDR, reset_cmd, sizeof(reset_cmd),
++	uint8_t evt[8];
++	int err;
++
++	/*
++	 * The reset pad pulse earlier in the probe posted its own
++	 * controller-ready event.  Drop stale events first: otherwise the
++	 * wait below matches that old 0x03, reports "ready" after ~6 ms and
++	 * the scan command races the firmware still coming out of reset.
++	 */
++	for (int i = 0; i < 32; ++i) {
++		if (touch_read(TOUCH_FTS_ADDR, 0x86, false, evt, sizeof(evt)) ||
++		    evt[0] == 0 || (evt[7] & 0x1fu) == 0) {
++			break;
++		}
++	}
++
++	err = touch_msg(TOUCH_FTS_ADDR, reset_cmd, sizeof(reset_cmd),
 +	    NULL, 0, false);
 +
 +	if (err) {
@@ -27,8 +55,6 @@ index 2d74a77..8dc5b4d 100644
 +		return err;
 +	}
 +	for (int i = 0; i < 50; ++i) {
-+		uint8_t evt[8];
-+
 +		if (!touch_read(TOUCH_FTS_ADDR, 0x86, false, evt, sizeof(evt)) &&
 +		    evt[0] == 0x03) {
 +			printf("SWEET TOUCH: FTS controller ready after %d ms\n", i * 2);
@@ -43,7 +69,23 @@ index 2d74a77..8dc5b4d 100644
  static int
  touch_st_fts(void)
  {
-@@ -1010,6 +1043,7 @@ touch_thread(void *arg, wait_result_t result)
+@@ -739,13 +785,13 @@ touch_st_fts(void)
+ 				x[id] = (int)px;
+ 				y[id] = (int)py;
+ 				mask |= (1u << id);
+-				changed = true;
++				changed = st.evt_seen = true;
+ 			}
+ 		} else if (id_code == 0x33) {
+ 			unsigned id = (evt[1] >> 4) & 0x0fu;
+ 			if (id < TOUCH_MAX) {
+ 				mask &= ~(1u << id);
+-				changed = true;
++				changed = st.evt_seen = true;
+ 			}
+ 		}
+ 		if ((evt[7] & 0x1fu) == 0) {
+@@ -1010,6 +1056,7 @@ touch_thread(void *arg, wait_result_t result)
  	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
  	(void)touch_probe_info(0x8240, legacy);
  #if defined(UMI)
@@ -51,7 +93,29 @@ index 2d74a77..8dc5b4d 100644
  	uint8_t fevt[8] = {0};
  	for (int i = 0; i < 16; ++i) {
  		if (touch_read(TOUCH_FTS_ADDR, 0x86, false, fevt, sizeof(fevt)) || fevt[0] == 0) {
-@@ -1057,9 +1091,10 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1019,12 +1066,17 @@ touch_thread(void *arg, wait_result_t result)
+ 			break;
+ 		}
+ 	}
+-	const uint8_t scan_off[3] = {0xa0, 0x00, 0x00};
+-	(void)touch_msg(TOUCH_FTS_ADDR, scan_off, sizeof(scan_off), NULL, 0, false);
+-	touch_wait(50);
++	/*
++	 * Vendor Screen ON path: sense on with calibration (0xa0 00 01)
++	 * straight after the reset.  Do not insert a sense-off first: a bare
++	 * 0xa0 00 00 -> 0xa0 00 01 pair leaves the scan engine off on this
++	 * panel (verified raw against the controller in TWRP; 0xa0 00 20,
++	 * sense on without cal, is what restores it and is the fallback in
++	 * the poll loop below).
++	 */
+ 	const uint8_t scan_on[3] = {0xa0, 0x00, 0x01};
+ 	(void)touch_msg(TOUCH_FTS_ADDR, scan_on, sizeof(scan_on), NULL, 0, false);
+-	touch_wait(20);
++	touch_wait(100);
+ 	int fe = touch_read(TOUCH_FTS_ADDR, 0x86, false, fevt, sizeof(fevt));
+ 	printf("SWEET TOUCH: probe %#x err=%d evt=%02x %02x %02x %02x irq=%#x\n",
+ 	    TOUCH_FTS_ADDR, fe, fevt[0], fevt[1], fevt[2], fevt[3], st.irq_status);
+@@ -1057,9 +1109,10 @@ touch_thread(void *arg, wait_result_t result)
  	    TOUCH_MAX_X + 1, TOUCH_MAX_Y + 1, st.irq_hint);
  	unsigned errors = 0, ticks = 0;
  	while (!st.dead) {
@@ -63,7 +127,7 @@ index 2d74a77..8dc5b4d 100644
  			int err = st.kind == TOUCH_GOODIX ? touch_goodix() : touch_focaltech();
  			if (err) {
  				if ((errors++ % 100u) == 0) {
-@@ -1072,6 +1107,14 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1072,6 +1125,30 @@ touch_thread(void *arg, wait_result_t result)
  				errors = 0;
  			}
  		}
@@ -73,6 +137,22 @@ index 2d74a77..8dc5b4d 100644
 +			printf("SWEET TOUCH: poll tick=%u irq_pin=%d active=%#x\n",
 +			    ticks, (touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_IRQ)) & 1u),
 +			    st.active);
++		}
++		/*
++		 * Bring-up safety net: the scan engine can fail to come up
++		 * after reset (a bare sense-off -> sense-on-with-cal pair
++		 * leaves it off, verified raw in TWRP).  If no touch event
++		 * has ever arrived, re-arm with sense on without cal, which
++		 * is what restored scanning in that experiment.
++		 */
++		if (!st.evt_seen && (ticks % 300u) == 0 && st.fallback < 3u) {
++			static const uint8_t scan_nocal[3] = {0xa0, 0x00, 0x20};
++
++			++st.fallback;
++			(void)touch_msg(TOUCH_FTS_ADDR, scan_nocal, sizeof(scan_nocal),
++			    NULL, 0, false);
++			printf("SWEET TOUCH: no touch events yet; sense on without cal (try %u)\n",
++			    st.fallback);
 +		}
 +#endif
  		touch_wait(10);
