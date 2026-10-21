@@ -2,6 +2,13 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Snapshot build `39612387536` / `95dc630` passed; artifact `12350822692`
+  downloaded to `xnu/out-touch-snapshot` and SHA256SUMS verified. Repacked
+  with UMI_FTS_SCAN=1 and temporarily booted from TWRP.
+  Image `shim/out/shim-boot-umi-touch-snapshot.img` SHA-256
+  `0f324718eb32bd21b8c31b34067f98272b677fe5369308513a3a4b1e406d544b`.
+  Await recovery log with UMI FTS reg/sysinfo lines for TWRP comparison.
+
 - Calibrated test failed: log `logs/clean-touch-calibrated-failed.txt` has
   successful initialization, one 43 05 01 force-cal status, command echoes,
   then no finger events or transfer errors. Noncal mode instead produces
