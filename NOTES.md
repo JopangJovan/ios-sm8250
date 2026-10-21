@@ -2,6 +2,13 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Run `39604884405` / `c3c1ce8` succeeded. Cold-cache job 8m30s, build 448 s;
+  no speed improvement demonstrated yet. Caches populated during post-job.
+  Artifact `12347389755` downloaded to `xnu/out-touch-diag`, SHA256SUMS passed.
+- New image `shim/out/shim-boot-umi-touch-diag.img` SHA-256
+  `61a5438bfbdc6bc724c0823f088e3f168129486ea9fdf42bd80a7763c648adb9`.
+  Temporarily booted after rebooting from TWRP. User touch test pending.
+
 - User reports clean touch image failed. Recovery ring saved as
   `logs/clean-touch-failed.txt`: only `UMI FTS: initialization failed`, no
   chip-ID/controller-ready diagnostic. Failure is early in initialization;
