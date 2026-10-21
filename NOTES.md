@@ -2,6 +2,23 @@
 
 ## Touch failure and CI optimization follow-up
 
+- IER test failed; `logs/clean-touch-ier-failed.txt`: IER02 before scan,
+  IER42 after queued echoes. No write was needed before scan, and no finger
+  events appeared. Bit40 may be status-dependent; no causal meaning proven.
+- User confirmed TWRP touch works and swiped during I2C tracing. Saved
+  `logs/twrp-fts-live-trace.txt`: real 13/23/33 events at addr49, command86,
+  repeated-start reads of 8 bytes. Parser matches actual device packets.
+- Physical screen cycling produced only FIFO traffic in
+  `logs/twrp-fts-physical-resume.txt`. TWRP did not suspend this controller.
+- Traced vendor stm_fts_cmd F1 (source cleanUp(1), reset/reenable only,
+  no firmware/calibration flash): result {00000000}. Trace saved as
+  `logs/twrp-fts-reset-trace.txt`. Actual sequence after ready:
+  A0 00 01; A2 00 00; A2 01 00; A2 02 00; A0 00 01;
+  A2 03 00 00 00 03. Existing clean driver omitted feature restoration.
+- New 0089 replays that captured sequence and matches vendor FIFO batching
+  (read remaining events in one command86 transaction). Removes speculative
+  IER write. Next test should use UMI_FTS_SCAN=1. Not yet hardware validated.
+
 - IER test run `39615955402` / `6fcf6ee`: Build step success, artifact
   `12354070226` checksum verified under `xnu/out-touch-ier`. Workflow was
   still reporting in_progress during cleanup when artifact was retrieved.

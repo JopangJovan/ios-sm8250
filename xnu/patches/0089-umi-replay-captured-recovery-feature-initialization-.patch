@@ -1,0 +1,75 @@
+From 4f8adeb1f4129390ffb478264428923cc9e8874f Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Wed, 21 Oct 2026 21:38:59 +0700
+Subject: [PATCH] umi: replay captured recovery feature initialization and FIFO
+ batching
+
+---
+ bsd/dev/sweet_touch.c | 40 ++++++++++++++++++++--------------------
+ 1 file changed, 20 insertions(+), 20 deletions(-)
+
+diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
+index 0a2dd00..96f3d20 100644
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -752,25 +752,18 @@ umi_fts_initialize(void)
+ 		    id[0], id[1], id[2], id[3]);
+ 		return ENXIO;
+ 	}
+-	/* Working UMI recovery reads IER=0x02; our reset boots with 0x42.
+-	 * Reproduce only that observed difference, preserving every other bit.
+-	 * Do not use generic IER_ENABLE (0x41) from unrelated controller variants. */
+-	const uint8_t ier_read[] = {0xfa, 0x20, 0, 0, 0x29};
+-	uint8_t ier = 0, verify = 0;
+-	if (umi_fts_xfer(ier_read, sizeof(ier_read), &ier, 1)) {
++	/* Captured on this phone with recovery stm_fts_cmd F1: senseOn(),
++	 * then forced mode-handler feature restoration, another senseOn(),
++	 * and the gesture mask. Do not assume reset cleared feature state. */
++	const uint8_t features[][3] = {{0xa2, 0, 0}, {0xa2, 1, 0}, {0xa2, 2, 0}};
++	if (umi_fts_xfer(sense_on, sizeof(sense_on), NULL, 0)) {
+ 		return EIO;
+ 	}
+-	const uint8_t ier_write[] = {0xfa, 0x20, 0, 0, 0x29, ier & ~0x40u};
+-	if ((ier & 0x40u) && umi_fts_xfer(ier_write, sizeof(ier_write), NULL, 0)) {
+-		return EIO;
+-	}
+-	if (umi_fts_xfer(ier_read, sizeof(ier_read), &verify, 1) ||
+-	    verify != (ier & ~0x40u)) {
+-		printf("UMI FTS: IER readback failed old=%#x got=%#x\n", ier, verify);
+-		return EIO;
++	for (unsigned i = 0; i < sizeof(features)/sizeof(features[0]); ++i) {
++		if (umi_fts_xfer(features[i], sizeof(features[i]), NULL, 0)) {
++			return EIO;
++		}
+ 	}
+-	printf("UMI FTS: IER vendor-state %#x -> %#x\n", ier, verify);
+-	/* Enable the controller's active scan and supported gesture mask. */
+ 	if (umi_fts_xfer(sense_on, sizeof(sense_on), NULL, 0) ||
+ 	    umi_fts_xfer(gestures, sizeof(gestures), NULL, 0)) {
+ 		return EIO;
+@@ -863,11 +856,18 @@ umi_touch_run(void)
+ 				++events;
+ 				umi_fts_event(event);
+ 			}
+-			for (unsigned i = 0; i < count && i < 31; ++i) {
+-				if (umi_fts_fifo(event) || !event[0]) {
+-					break;
++			if (count) {
++				uint8_t batch[31 * 8];
++				const uint8_t cmd = UMI_FTS_FIFO;
++				/* Vendor drains all remaining records in one transaction. */
++				if (umi_fts_xfer(&cmd, 1, batch, count * 8)) {
++					++errors;
++				} else for (unsigned i = 0; i < count; ++i) {
++					if (batch[i * 8]) {
++						++events;
++						umi_fts_event(batch + i * 8);
++					}
+ 				}
+-				umi_fts_event(event);
+ 			}
+ 		} else {
+ 			++errors;
+-- 
+2.56.0
+
