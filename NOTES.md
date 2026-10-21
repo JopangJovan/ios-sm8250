@@ -2,6 +2,19 @@
 
 ## Agent handoff / active work (2026-10-20, Xiaomi Mi 10 `umi` port)
 
+### >>> UPDATE 2026-10-21 (UMI touch: u4 results + panel-init step, commit `5bd559c`) <<<
+
+**u4 boot (image `shim/out/shim-boot-0083u4.img`, CI run `39557412441`, log `logs/umi-fts-u4.txt`): still no touch - but every register-level question is now closed:**
+- Register reads work after the repeated-START fix and are **byte-identical to the TWRP reference**: chipid `36 39 03 00`, fwver `23 01 56 39`, sysreset `00`, bootopt `20`, icr `c0`, gpio_in `30 3f`, gpio_dir `0f 20`, gpio_pu `0f 00`, crc `c0`. Probe-time IER was `42`, after our write `02` (holds `02` in every tick) - our IER write takes effect.
+- `avdd=1/1 rst=1/1` (latch/pad) every tick: the pin writes reach the pads. The chip **ACKs a valid chip id while AVDD is driven low** -> it runs from vdd (PM8150A L1) alone; GPIO69 only feeds the panel analog side, so the power cycle restarts the panel, not the controller (which is why POR alone never fixed anything).
+- `43 05 01` fires exactly once per `0x01` (cal), never spontaneously. **The working TWRP chip logs the same "Mutual negative detect Force cal" events at its own boot** (dmesg, plus one "SS negative detect") and a fresh `0x01` on it produced no new event -> routine startup calibration artifact on this panel, NOT an iOS anomaly signal.
+- Zero I2C errors, chip IRQ pin never goes low: the controller genuinely has nothing to report.
+- No PMIC ADC channel exists for the touch rail (checked live in TWRP: only vph/vcoin/usb/temps), so AVDD voltage stays unmeasurable in software. `ts_active` pinctrl covers only pins 38/39 (no hidden power pins). Vendor `fts_set_gpio()` never pulses the reset pad (the pulse block is commented out; it only drives reset high) - our pad is held low from early probe then released, then FTI-reset anyway, so no harmful deviation there.
+
+**NEW PRIME SUSPECT - the vendor probe step we never replicated (vendor source):** `fts_fw_update()` reads the **208-byte system info** from the framebuffer (`A6` + 16-bit addr, 16-bit addr, no dummy on I2C; header `0xa5`) and compares the AFE versions: **CFG = byte 28, CX = 29, PanelMem = 30**. With `PRE_SAVED_METHOD` (defined): `cfg != cx` -> `SPECIAL_FULL_PANEL_INIT` = **`A4 00 03`**; `cfg != panel` -> `SPECIAL_PANEL_INIT` = **`A4 00 02`**; then `production_test_initialization()` **resets, writes the command, refreshes** (`A4 06 01` = requestSyncFrame + framebuffer re-read), and only then `fts_init_sensing()` sends `0x01`. The TWRP chip gets this at every Android/TWRP boot; the iOS chip has **never** received it -> AFE never initialized for the panel while everything else (reset/echo/cal/registers) looks normal. Fits all observations including "chip calibrates but never reports touch".
+
+**This build does:** `touch_fts_frame_read()` + `touch_fts_panel_init()` after the reset at probe and after every power-cycle reset: log `sysinfo fw/svn/cfgver afe cfg/cx/panel=xx/xx/xx` -> vendor-matching decision (or blind send on bad header) -> optional second reset -> `A4 00 02/03` -> wait 100 ms -> `A4 06 01` -> re-log AFE triple (**post-init match vs pre-init CFG = proof it ran**; `afe versions match; vendor skips init` = hypothesis dead, look elsewhere). Then the existing `0x01` + IER + dump. Next: boot, tap, TWRP, pull `logs/umi-fts-u5.txt`.
+
 ### >>> UPDATE 2026-10-21 (UMI touch: register-read bug + AVDD power-cycle recovery, commit `55a16f6`) <<<
 
 **What the 0083u3 log (`logs/umi-fts-u3.txt`, boot 13:08:33) actually showed:**
