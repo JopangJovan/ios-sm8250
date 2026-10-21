@@ -2,6 +2,13 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Supply test run `39608458872` / `4c40080` passed. Kernel artifact
+  `12349168412` downloaded to `xnu/out-touch-vdd` and checksum verified.
+  Image `shim/out/shim-boot-umi-touch-vdd.img` SHA-256
+  `8dea7b7bab7241f02503ed400651f7a86e8106f3a5610008b054972828638651`.
+  Rebooted from TWRP and temporarily booted for touch test. Await hardware
+  result; on failure inspect RPMh and UMI FTS bus-idle diagnostics.
+
 - GPIO gate test failed; log `logs/clean-touch-egpio-failed.txt` shows cfg
   SDA/SCL=0x3 (no eGPIO-present flag), idle 0/0. Gate hypothesis ruled out.
 - New 0084 supplies the missing explicit vdd vote: umi DT maps FTS vdd to
