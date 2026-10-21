@@ -2,6 +2,13 @@
 
 ## Touch failure and CI optimization follow-up
 
+- IER test run `39615955402` / `6fcf6ee`: Build step success, artifact
+  `12354070226` checksum verified under `xnu/out-touch-ier`. Workflow was
+  still reporting in_progress during cleanup when artifact was retrieved.
+  Image `shim/out/shim-boot-umi-touch-ier.img`, umifts_scan=1, SHA-256
+  `ab6b87253747efc0780e613d3a83216e172ac7f91ea29fe6f2c81a623340e9de`.
+  Temporarily booted from TWRP; functional result pending user test.
+
 - Hardware reset test failed: `logs/clean-touch-hwreset-failed.txt` shows
   chipid/AFE/supply/transport all good, IER still42, no finger events. Reset
   selection does not explain IER difference from TWRP02.
