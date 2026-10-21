@@ -1,0 +1,100 @@
+From b2a7067bb0f650cefbb5560b0d84a1849a89e6bb Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Wed, 21 Oct 2026 20:29:16 +0700
+Subject: [PATCH] umi: enable FTS521 1.8V supply through RPMh ldoc1
+
+---
+ bsd/dev/sweet_rpmh.c  | 26 ++++++++++++++++++++++++--
+ bsd/dev/sweet_touch.c |  8 +++++++-
+ 2 files changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/bsd/dev/sweet_rpmh.c b/bsd/dev/sweet_rpmh.c
+index 4da50d8..a1a3e6d 100644
+--- a/bsd/dev/sweet_rpmh.c
++++ b/bsd/dev/sweet_rpmh.c
+@@ -46,7 +46,10 @@ int sweet_rpmh_vreg_enable(const char *res, unsigned mv);
+ #define RH_VRM          4u
+ #define RH_TIMEOUT_US   100000u
+ 
+-static vm_offset_t rh_rsc, rh_tcs, rh_dict, rh_db;
++static vm_offset_t rh_rsc, rh_tcs, rh_db;
++#if !defined(ARM64_BOARD_CONFIG_UMI)
++static vm_offset_t rh_dict;
++#endif
+ static uint32_t rh_db_size;
+ static unsigned rh_ncpt;
+ static unsigned rh_lock;
+@@ -106,10 +109,15 @@ rh_map(void)
+ 	if (!rh_tcs) {
+ 		rh_tcs = ml_io_map(RH_TCS_PA, RH_TCS_SIZE);
+ 	}
++#if !defined(ARM64_BOARD_CONFIG_UMI)
+ 	if (!rh_dict) {
+ 		rh_dict = ml_io_map(RH_DICT_PA, 8);
+ 	}
+-	if (!rh_rsc || !rh_tcs || !rh_dict) {
++	if (!rh_dict) {
++		return ENOMEM;
++	}
++#endif
++	if (!rh_rsc || !rh_tcs) {
+ 		printf("SWEET RPMH: RSC/locator mapping failed\n");
+ 		return ENOMEM;
+ 	}
+@@ -129,8 +137,14 @@ rh_map(void)
+ 		return ENODEV;
+ 	}
+ 	if (!rh_db) {
++#if defined(ARM64_BOARD_CONFIG_UMI)
++		/* umi live DT reserved-memory/cmd_db, not sweet's IMEM locator. */
++		uint32_t pa = 0x80860000u;
++		uint32_t size = 0x20000u;
++#else
+ 		uint32_t pa = rh_read(rh_dict, 0);
+ 		uint32_t size = rh_read(rh_dict, 4);
++#endif
+ 		printf("SWEET RPMH: cmd-db locator=%#x pa=%#x size=%#x\n", RH_DICT_PA, pa, size);
+ 		/* Firmware supplies the reserved RAM address; never scan physical RAM. */
+ 		if (pa < 0x80000000u || (pa & 3u) || (size & 3u) ||
+@@ -328,10 +342,18 @@ int
+ sweet_rpmh_vreg_enable(const char *res, unsigned mv)
+ {
+ 	/* Board-specific helper: do not apply PMIC5-LDO policy to arbitrary resources. */
++#if defined(ARM64_BOARD_CONFIG_UMI)
++	/* umi: st,fts vdd-supply -> PM8150A L1, resource ldoc1, exactly 1.8V. */
++	if (!res || strcmp(res, "ldoc1") || mv != 1800) {
++		printf("UMI RPMH: expected ldoc1 at 1800 mV\n");
++		return EINVAL;
++	}
++#else
+ 	if (!res || strcmp(res, "ldoc11") || mv < 2950 || mv > 3400) {
+ 		printf("SWEET RPMH: expected ldoc11 and 2950..3400 mV\n");
+ 		return EINVAL;
+ 	}
++#endif
+ 	if (__atomic_exchange_n(&rh_lock, 1, __ATOMIC_ACQUIRE)) {
+ 		return EBUSY;
+ 	}
+diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
+index 167053b..37d29d6 100644
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -773,8 +773,14 @@ umi_touch_run(void)
+ 		return;
+ 	}
+ 	touch_gpio(TOUCH_GPIO_IRQ, 0, 3, 3, false, false);
+-	touch_gpio(TOUCH_GPIO_POWER, 0, 0, 0, true, true);
+ 	touch_gpio(TOUCH_GPIO_RESET, 0, 3, 3, true, false);
++	int power_error = sweet_rpmh_vreg_enable("ldoc1", 1800);
++	printf("UMI FTS: vdd ldoc1 1800mV vote err=%d\n", power_error);
++	if (power_error) {
++		return;
++	}
++	touch_wait(15);
++	touch_gpio(TOUCH_GPIO_POWER, 0, 0, 0, true, true);
+ 	touch_wait(10);
+ 	touch_gpio(TOUCH_GPIO_RESET, 0, 3, 3, true, true);
+ 	touch_wait(100);
+-- 
+2.56.0
+

@@ -2,6 +2,15 @@
 
 ## Touch failure and CI optimization follow-up
 
+- GPIO gate test failed; log `logs/clean-touch-egpio-failed.txt` shows cfg
+  SDA/SCL=0x3 (no eGPIO-present flag), idle 0/0. Gate hypothesis ruled out.
+- New 0084 supplies the missing explicit vdd vote: umi DT maps FTS vdd to
+  pm8150a_l1 / ldoc1 at 1800mV. Recovery cmd_db confirms ldoc1 address 0x42e00.
+  Uses existing bounded RPMh helper with UMI-only resource whitelist and
+  DT command DB range 0x80860000 + 0x20000. RSC DRV2 and TCS offset match DT.
+  Vote precedes AVDD enable/reset release. Bus-low cause remains a hypothesis
+  until the next log confirms voltage vote and idle pin state.
+
 - Warm-cache run `39606835064` / `a5e943f` passed: job 6m19s versus previous
   cold run approximately 8m30s (user observed 8m33s). KDK restore 30s, host
   tools 1s, Build 323s versus cold 448s. This is one measured comparison,
