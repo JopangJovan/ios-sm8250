@@ -9,6 +9,11 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 kernel=${1:-"$repo/xnu/out/kernel.development.umi"}
 dtb=${2:-"$repo/dtb/umi.dtb"}
 out=${3:-"$repo/shim/out/shim-boot-umi-safe.img"}
+scan=${UMI_FTS_SCAN:-32}
+case "$scan" in
+    1|32) ;;
+    *) echo 'error: UMI_FTS_SCAN must be 1 (calibrate) or 32 (no calibration)' >&2; exit 1 ;;
+esac
 
 [ -f "$kernel" ] || { echo "error: missing UMI kernel: $kernel" >&2; exit 1; }
 [ -f "$dtb" ] || { echo "error: missing UMI DTB: $dtb" >&2; exit 1; }
@@ -21,7 +26,7 @@ payload="$repo/shim/out/umi-safe-payload.bin"
 
 python3 "$repo/tools/mkadt.py" "$adt" --board umi --highmem
 python3 "$repo/tools/mkpayload.py" "$kernel" "$adt" "$payload" \
-    --cmdline 'debug=0xc serial=3 cpus=8 keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_noconsole=1 sweetfb_hz=30 sweettouch=1 sweettouchdelay=10 sweetkeys=1 sweetusb=0'
+    --cmdline "debug=0xc serial=3 cpus=8 keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_noconsole=1 sweetfb_hz=30 sweettouch=1 sweettouchdelay=10 sweetkeys=1 sweetusb=0 umifts_scan=$scan"
 
 (cd "$repo" && BOARD=umi DTB="$dtb" shim/build.sh ../shim/out/umi-safe-payload.bin)
 cp "$repo/shim/out/shim-boot.img" "$out"

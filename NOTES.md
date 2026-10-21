@@ -2,6 +2,15 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Scan=0x20 user test failed. `logs/clean-touch-scan-failed.txt` confirms
+  supply/bus/chipid success, command echoes, then repeated 43 03 status
+  (vendor EVT_TYPE_STATUS_FRAME_DROP), no logged 13/23/33 finger events.
+  Added UMI_FTS_SCAN=1|32 build wrapper option; same 0085 kernel repacked
+  with umifts_scan=1, without sense-off/on cycling. Temporarily booted image
+  `shim/out/shim-boot-umi-touch-calibrated.img`, SHA-256
+  `f009d9c4d04addc0cccbe16564d5dd283e4791a1858c30b127a28adfc6c139c3`.
+  Await user test; no CI rebuild needed for this A/B comparison.
+
 - Scan test run `39610160838` / `65faafe` passed. Artifact `12350451694`
   downloaded to `xnu/out-touch-scan`; SHA256SUMS passed. Image
   `shim/out/shim-boot-umi-touch-scan.img` SHA-256
