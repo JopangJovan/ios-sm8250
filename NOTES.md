@@ -2,6 +2,15 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Snapshot test failed. `logs/clean-touch-snapshot-failed.txt` shows TWRP
+  register snapshot matches XNU except IER: XNU42 versus TWRP02. AFE08/08/08,
+  firmware/chipid and GPIO/CRC/ICR agree. No finger events.
+- Vendor ftsCore.c reset path uses GPIO pulse (10ms) when reset_gpio exists;
+  only the GPIO_NOT_DEFINED case writes software reset. Our clean driver
+  always sent software reset after a pad pulse. New 0087 follows vendor GPIO
+  reset and waits for fresh controller-ready, preserving register diagnostics.
+  Whether this explains IER difference or touch failure remains unverified.
+
 - Snapshot build `39612387536` / `95dc630` passed; artifact `12350822692`
   downloaded to `xnu/out-touch-snapshot` and SHA256SUMS verified. Repacked
   with UMI_FTS_SCAN=1 and temporarily booted from TWRP.

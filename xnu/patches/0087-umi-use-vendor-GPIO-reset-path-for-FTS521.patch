@@ -1,0 +1,41 @@
+From ac196fd61f1ef9a58e35c92e83f25c55f9ce17b7 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Wed, 21 Oct 2026 21:06:52 +0700
+Subject: [PATCH] umi: use vendor GPIO reset path for FTS521
+
+---
+ bsd/dev/sweet_touch.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
+index 6ca32d2..8ee49cb 100644
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -716,7 +716,6 @@ umi_fts_drain(void)
+ static int
+ umi_fts_initialize(void)
+ {
+-	static const uint8_t reset[] = {0xfa, 0x20, 0x00, 0x00, 0x24, 0x80};
+ 	/* FTS521 vendor Screen ON/FOD path supports 0x20 (no calibration).
+ 	 * Keep the selection in boot args so both supported modes can be tested
+ 	 * without rebuilding. Do not stop sensing between reset and this command. */
+@@ -731,10 +730,12 @@ umi_fts_initialize(void)
+ 	uint8_t event[8], id[4] = {0};
+ 
+ 	umi_fts_drain();
+-	if (umi_fts_xfer(reset, sizeof(reset), NULL, 0)) {
+-		printf("UMI FTS: software reset transfer failed\n");
+-		return EIO;
+-	}
++	/* ftsCore.c fts_system_reset(): when reset_gpio is defined, Xiaomi
++	 * pulses the pad low for 10ms instead of writing ADDR_SYSTEM_RESET.
++	 * The UMI DT explicitly supplies reset GPIO38. */
++	touch_gpio(TOUCH_GPIO_RESET, 0, 3, 3, true, false);
++	touch_wait(10);
++	touch_gpio(TOUCH_GPIO_RESET, 0, 3, 3, true, true);
+ 	for (unsigned i = 0; i < 60; ++i) {
+ 		touch_wait(2);
+ 		if (!umi_fts_fifo(event) && event[0] == 0x03) {
+-- 
+2.56.0
+
