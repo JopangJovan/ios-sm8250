@@ -2,6 +2,15 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Diagnostic boot log saved to `logs/clean-touch-diag-failed.txt`: SDA=0 and
+  SCL=0 while reset/power read 0x3, first FIFO and reset writes fail at address.
+  Thus no FTS protocol exchange succeeded in this build. Vendor pinctrl-kona
+  declares eGPIO present bit11 / enable bit12; msm_pinmux_set_mux enables bit12
+  when bit11 is set. Added this missing step under UMI plus GPIO config logs.
+  This is a hypothesis under test, not a confirmed root cause.
+- TWRP regulator summary confirms pm8150a_l1 at 1800mV and disp_vddio_vreg
+  enabled with 3-0049 as consumer. This does not establish rail state in XNU.
+
 - Run `39604884405` / `c3c1ce8` succeeded. Cold-cache job 8m30s, build 448 s;
   no speed improvement demonstrated yet. Caches populated during post-job.
   Artifact `12347389755` downloaded to `xnu/out-touch-diag`, SHA256SUMS passed.
