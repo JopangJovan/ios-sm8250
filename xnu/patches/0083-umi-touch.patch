@@ -1,5 +1,5 @@
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 2d74a77..867dc0a 100644
+index 2d74a77..72cb4aa 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -111,10 +111,10 @@ void sweet_touch_init(void);
@@ -15,26 +15,31 @@ index 2d74a77..867dc0a 100644
  	int x[TOUCH_MAX], y[TOUCH_MAX];
  } st;
  static int touch_sleep_chan;
-@@ -700,7 +700,114 @@ touch_goodix(void)
+@@ -700,7 +700,152 @@ touch_goodix(void)
   *   Y = (evt[4] << 4) | ((evt[3] & 0xf0) >> 4)
   * Slot ID:
   *   id = (evt[1] >> 4) & 0x0f
 + *
-+ * The UMI device tree has no reset-gpio property, so the vendor driver
-+ * resets the IC through the FTI system register instead of the reset pad:
++ * The vendor kernel device tree does carry fts,reset-gpio = <&tlmm 38 0>
++ * (fts,reset-gpio-enable), so the vendor driver pulses the reset pad; it
++ * additionally resets through the FTI system register during fts_crc_check:
 + *   fts_writeU8UX(FTS_CMD_HW_REG_W, BITS_32, ADDR_SYSTEM_RESET, {0x80}, 1)
 + * i.e. FA 20 00 00 24 80, then waits for EVT_ID_CONTROLLER_READY (0x03).
 + * Reset the same way here, and drain before writing: the reset pad pulse
 + * earlier in the probe already posted its own ready event.
   */
-+/* FTI system register read: FA <addr:32> then read.  A STOP between the two
-+ * messages is fine here, exactly like the FIFO command below. */
++/* FTI system register read: FA <addr:32> then read, as ONE transaction.  A
++ * STOP between the two messages breaks it: the controller ignores the lone
++ * address write and the following bare read returns FIFO event bytes
++ * instead of the register (seen as every dump value coming back 43 .. on
++ * UMI).  stretch=true on the command write holds the bus for the repeated
++ * START, exactly like the FIFO pointer write below. */
 +static int
 +touch_fts_hw_read(uint32_t reg, uint8_t *buf, unsigned len)
 +{
 +	uint8_t cmd[5] = {0xfa, (uint8_t)(reg >> 24), (uint8_t)(reg >> 16),
 +	    (uint8_t)(reg >> 8), (uint8_t)reg};
-+	int err = touch_msg(TOUCH_FTS_ADDR, cmd, sizeof(cmd), NULL, 0, false);
++	int err = touch_msg(TOUCH_FTS_ADDR, cmd, sizeof(cmd), NULL, 0, true);
 +
 +	if (err) {
 +		return err;
@@ -127,10 +132,43 @@ index 2d74a77..867dc0a 100644
 +	return EIO;
 +}
 +
++/*
++ * Full power-cycle recovery.  The vendor driver always gets a real power-on
++ * reset because the regulators start disabled at every Android boot; here
++ * AVDD (TLMM 69, regulator-fixed, consumed only by the two touch nodes) is
++ * only ever driven high, so a controller left in an odd state by the
++ * bootloader may never see a POR and a software reset alone may not clear
++ * it.  Cut AVDD, check whether the controller (which runs from vdd/PM8150A
++ * L1 on its own, or not at all) still ACKs while it is down, restore, then
++ * reset and re-arm exactly like the vendor power-on path.  Safe: the
++ * display runs off pm8150_l14, a different rail.
++ */
++static void
++touch_fts_power_cycle(unsigned try_no)
++{
++	static const uint8_t scan_on[3] = {0xa0, 0x00, 0x01};
++	uint8_t b[4] = {0};
++	int err;
++
++	touch_gpio(TOUCH_GPIO_POWER, 0, 0, 0, true, false); /* AVDD off */
++	touch_wait(100);
++	err = touch_fts_hw_read(0x20000000, b, 4); /* chip alive on vdd alone? */
++	printf("SWEET TOUCH: por%u: chipid %02x %02x %02x %02x err=%d while avdd off\n",
++	    try_no, b[0], b[1], b[2], b[3], err);
++	touch_gpio(TOUCH_GPIO_POWER, 0, 0, 0, true, true); /* AVDD on */
++	touch_wait(15); /* vendor fts_enable_reg spacing after vdd */
++	(void)touch_fts_reset();
++	(void)touch_msg(TOUCH_FTS_ADDR, scan_on, sizeof(scan_on), NULL, 0, false);
++	touch_wait(100);
++	touch_fts_set_ier(0x02);
++	printf("SWEET TOUCH: por%u: avdd cycled, reset + sense on + ier done\n", try_no);
++	touch_fts_dump_regs("por");
++}
++
  static int
  touch_st_fts(void)
  {
-@@ -739,13 +846,13 @@ touch_st_fts(void)
+@@ -739,13 +884,13 @@ touch_st_fts(void)
  				x[id] = (int)px;
  				y[id] = (int)py;
  				mask |= (1u << id);
@@ -146,7 +184,7 @@ index 2d74a77..867dc0a 100644
  			}
  		}
  		if ((evt[7] & 0x1fu) == 0) {
-@@ -1010,6 +1117,7 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1010,6 +1155,7 @@ touch_thread(void *arg, wait_result_t result)
  	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
  	(void)touch_probe_info(0x8240, legacy);
  #if defined(UMI)
@@ -154,7 +192,7 @@ index 2d74a77..867dc0a 100644
  	uint8_t fevt[8] = {0};
  	for (int i = 0; i < 16; ++i) {
  		if (touch_read(TOUCH_FTS_ADDR, 0x86, false, fevt, sizeof(fevt)) || fevt[0] == 0) {
-@@ -1019,15 +1127,25 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1019,15 +1165,25 @@ touch_thread(void *arg, wait_result_t result)
  			break;
  		}
  	}
@@ -184,7 +222,7 @@ index 2d74a77..867dc0a 100644
  	st.probing = false;
  	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && (gid[3] == '6' || gid[3] == '9');
  	bool fts = !fe;
-@@ -1057,9 +1175,10 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1057,9 +1213,10 @@ touch_thread(void *arg, wait_result_t result)
  	    TOUCH_MAX_X + 1, TOUCH_MAX_Y + 1, st.irq_hint);
  	unsigned errors = 0, ticks = 0;
  	while (!st.dead) {
@@ -196,24 +234,27 @@ index 2d74a77..867dc0a 100644
  			int err = st.kind == TOUCH_GOODIX ? touch_goodix() : touch_focaltech();
  			if (err) {
  				if ((errors++ % 100u) == 0) {
-@@ -1072,6 +1191,46 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1072,6 +1229,56 @@ touch_thread(void *arg, wait_result_t result)
  				errors = 0;
  			}
  		}
 +#if defined(UMI)
 +		/*
-+		 * Bring-up diagnostic: pin levels plus the chip's interrupt
-+		 * enable register (IER, 0x20000029).  avdd/rst are output
-+		 * latches (bit 1), irq is the input (bit 0).
++		 * Bring-up diagnostic: pin latches and actual pad levels
++		 * (latch/pad) plus the chip's interrupt enable register
++		 * (IER, 0x20000029).  A high latch with a low pad means the
++		 * write stuck in the register but never reached the pin.
 +		 */
 +		if ((ticks % 500u) == 0) {
 +			uint8_t ier = 0;
++			uint32_t io_avdd = touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_POWER));
++			uint32_t io_rst = touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_RESET));
 +
 +			(void)touch_fts_hw_read(0x20000029, &ier, 1);
-+			printf("SWEET TOUCH: poll tick=%u irq_pin=%d avdd=%u rst=%u ier=%#x active=%#x\n",
++			printf("SWEET TOUCH: poll tick=%u irq_pin=%d avdd=%u/%u rst=%u/%u ier=%#x active=%#x\n",
 +			    ticks, (touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_IRQ)) & 1u),
-+			    (touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_POWER)) >> 1) & 1u,
-+			    (touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_RESET)) >> 1) & 1u,
++			    (io_avdd >> 1) & 1u, io_avdd & 1u,
++			    (io_rst >> 1) & 1u, io_rst & 1u,
 +			    ier, st.active);
 +		}
 +		/*
@@ -222,18 +263,25 @@ index 2d74a77..867dc0a 100644
 +		 * display turns on well after this driver probes.  As long as
 +		 * no touch event has ever arrived, re-drive the avdd enable
 +		 * and re-arm with sense on without cal every 5 s (the pair
-+		 * TWRP proved restores scanning on a live panel).
++		 * TWRP proved restores scanning on a live panel).  After three
++		 * cheap tries escalate to a full AVDD power-cycle recovery,
++		 * which is the only sequence the vendor path gets for free at
++		 * every boot.
 +		 */
 +		if (!st.evt_seen && (ticks % 500u) == 0 && st.fallback < 120u) {
 +			static const uint8_t scan_nocal[3] = {0xa0, 0x00, 0x20};
 +
 +			++st.fallback;
-+			touch_gpio(TOUCH_GPIO_POWER, 0, 0, 0, true, true);
-+			(void)touch_msg(TOUCH_FTS_ADDR, scan_nocal, sizeof(scan_nocal),
-+			    NULL, 0, false);
-+			touch_fts_set_ier(0x02);
-+			printf("SWEET TOUCH: no touch events yet; avdd + sense on without cal (try %u)\n",
-+			    st.fallback);
++			if (st.fallback <= 3u) {
++				touch_gpio(TOUCH_GPIO_POWER, 0, 0, 0, true, true);
++				(void)touch_msg(TOUCH_FTS_ADDR, scan_nocal, sizeof(scan_nocal),
++				    NULL, 0, false);
++				touch_fts_set_ier(0x02);
++				printf("SWEET TOUCH: no touch events yet; avdd + sense on without cal (try %u)\n",
++				    st.fallback);
++			} else {
++				touch_fts_power_cycle(st.fallback);
++			}
 +			/* Re-dump the registers every 6th retry to catch changes. */
 +			if ((st.fallback % 6u) == 0) {
 +				touch_fts_dump_regs("poll");
