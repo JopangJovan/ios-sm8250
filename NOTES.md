@@ -1,5 +1,21 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Clean UMI touch build: 2026-10-21 19:59 WIB
+
+- Branch `umi-touch-clean`, source `3d1fac1`: fresh 0083 GPIO-I2C ST FTS521
+  implementation. Old 0083 patch history is excluded from this branch.
+- Actions run `39602947805` succeeded; downloaded kernel artifact `12346717899`
+  into `xnu/out-touch-clean`, verified its supplied SHA256SUMS.
+- Image `shim/out/shim-boot-umi-touch-clean.img`, SHA-256
+  `7903353a31f6460c2e1b2a8f8268b9eb91b4e87b6128a592095f81811b8ee0b8`.
+- Saved prior boot ring from TWRP to `logs/pre-clean-touch.txt`, then rebooted
+  to fastboot, verified product umi, and temporarily booted the new image.
+  Send OKAY 0.442 s, boot OKAY 0.146 s. Touch functionality awaits user test.
+- Boot args: cpus=8, sweetkeys=1, sweettouch=1, sweettouchdelay=10, sweetusb=0.
+- The default kernel argument in the build wrapper still points to the older
+  xnu/out artifact: explicitly use xnu/out-touch-clean/kernel.development.umi
+  when rebuilding this test image.
+
 ## UMI clean rebuild handoff (2026-10-21)
 
 - Worktree: `/home/jopvan/ios-sm8250-umi-codex`, branch `umi-rebuild`, based on
