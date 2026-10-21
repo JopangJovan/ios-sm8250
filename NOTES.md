@@ -2,6 +2,18 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Calibrated test failed: log `logs/clean-touch-calibrated-failed.txt` has
+  successful initialization, one 43 05 01 force-cal status, command echoes,
+  then no finger events or transfer errors. Noncal mode instead produces
+  repeated frame drops. No HID finger events are being generated yet.
+- Added read-only recovery utility `tools/umi-fts-snapshot.c`, built static
+  aarch64 and run from /tmp in TWRP. No scan/reset/flash/data-register writes.
+  Working reference: chip 3639, FW0123, IER first byte02, ICR c0, gpio_in
+  30 3f, gpio_dir 0f20, gpio_pullup 0f00, CRC c0; sysinfo AFE08/08/08.
+- New 0086 adds equivalent XNU register/sysinfo reads after scan startup.
+  Next test must use UMI_FTS_SCAN=1 to compare calibrated mode to TWRP.
+  This patch is diagnostic, not a demonstrated touch fix.
+
 - Scan=0x20 user test failed. `logs/clean-touch-scan-failed.txt` confirms
   supply/bus/chipid success, command echoes, then repeated 43 03 status
   (vendor EVT_TYPE_STATUS_FRAME_DROP), no logged 13/23/33 finger events.
