@@ -1,5 +1,5 @@
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 2d74a77..89d1b6f 100644
+index 2d74a77..a512f9e 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -111,10 +111,10 @@ void sweet_touch_init(void);
@@ -15,23 +15,53 @@ index 2d74a77..89d1b6f 100644
  	int x[TOUCH_MAX], y[TOUCH_MAX];
  } st;
  static int touch_sleep_chan;
-@@ -454,12 +454,13 @@ touch_irq(void)
+@@ -454,12 +454,14 @@ touch_irq(void)
  	return st.irq_last;
  }
  
 -/* One Linux-style FIFO message. TX is at most 3 bytes; RX at most 90. */
-+/* One Linux-style FIFO message. TX is at most 3 bytes; RX at most 255
-+ * (the FTS framebuffer read is 208 bytes; 255 fits an 8-bit length). */
++/* One Linux-style FIFO message. TX is at most 16 bytes (the FTI register
++ * read command is 5); RX at most 255 (the FTS framebuffer read is 208
++ * bytes; 255 fits an 8-bit length). */
  static int
  touch_msg_run(uint8_t addr, const uint8_t *tx, unsigned nt, uint8_t *rx,
      unsigned nr, bool stretch)
  {
 -	if (st.dead || nt > 3 || nr > 90 || (nt && nr) || (!nt && !nr)) {
-+	if (st.dead || nt > 3 || nr > 255 || (nt && nr) || (!nt && !nr)) {
++	if (st.dead || nt > 16 || nr > 255 || (nt && nr) || (!nt && !nr)) {
  		return EIO;
  	}
  	if (!touch_wait_clear(st.se, SE_STATUS, 1u)) {
-@@ -700,7 +701,236 @@ touch_goodix(void)
+@@ -491,13 +493,22 @@ touch_msg_run(uint8_t addr, const uint8_t *tx, unsigned nt, uint8_t *rx,
+ 			}
+ 			break;
+ 		}
+-		if (nt && !st.sent && (irq & SE_TX_WM_IRQ)) {
+-			uint32_t word = 0;
+-			for (unsigned j = 0; j < nt; ++j) {
+-				word |= (uint32_t)tx[j] << (8u * j);
++		if (nt && st.sent < nt && (irq & SE_TX_WM_IRQ)) {
++			/* Up to 4 bytes per FIFO word, LSB first (packing
++			 * config moves them out MSB-first on the wire). */
++			while (st.sent < nt) {
++				uint32_t word = 0;
++				unsigned chunk = nt - st.sent;
++
++				if (chunk > 4u) {
++					chunk = 4u;
++				}
++				for (unsigned j = 0; j < chunk; ++j) {
++					word |= (uint32_t)tx[st.sent + j] << (8u * j);
++				}
++				touch_wr(st.se, SE_TX, word);
++				st.sent += chunk;
+ 			}
+-			touch_wr(st.se, SE_TX, word);
+-			st.sent = nt;
+ 			touch_wr(st.se, SE_TX_WM, 0);
+ 		}
+ 		uint32_t count = touch_rd(st.se, SE_RX_COUNT) & 0x1ffffffu;
+@@ -700,7 +711,236 @@ touch_goodix(void)
   *   Y = (evt[4] << 4) | ((evt[3] & 0xf0) >> 4)
   * Slot ID:
   *   id = (evt[1] >> 4) & 0x0f
@@ -43,7 +73,7 @@ index 2d74a77..89d1b6f 100644
 + * i.e. FA 20 00 00 24 80, then waits for EVT_ID_CONTROLLER_READY (0x03).
 + * Reset the same way here, and drain before writing: the reset pad pulse
 + * earlier in the probe already posted its own ready event.
-  */
++ */
 +/* FTI system register read: FA <addr:32> then read, as ONE transaction.  A
 + * STOP between the two messages breaks it: the controller ignores the lone
 + * address write and the following bare read returns FIFO event bytes
@@ -241,7 +271,7 @@ index 2d74a77..89d1b6f 100644
 + * L1 on its own, or not at all) still ACKs while it is down, restore, then
 + * reset and re-arm exactly like the vendor power-on path.  Safe: the
 + * display runs off pm8150_l14, a different rail.
-+ */
+  */
 +static void
 +touch_fts_power_cycle(unsigned try_no)
 +{
@@ -268,7 +298,7 @@ index 2d74a77..89d1b6f 100644
  static int
  touch_st_fts(void)
  {
-@@ -739,13 +969,13 @@ touch_st_fts(void)
+@@ -739,13 +979,13 @@ touch_st_fts(void)
  				x[id] = (int)px;
  				y[id] = (int)py;
  				mask |= (1u << id);
@@ -284,7 +314,68 @@ index 2d74a77..89d1b6f 100644
  			}
  		}
  		if ((evt[7] & 0x1fu) == 0) {
-@@ -905,10 +1135,36 @@ touch_se_init(void)
+@@ -826,39 +1066,31 @@ touch_se_init(void)
+ 	printf("SWEET TOUCH: if_disable=%#x\n", ifdis);
+ 	if (ifdis & 1u) {
+ 		/*
+-		 * UMI's ABL (and TWRP) run SE13 in GSI mode, which disables
+-		 * the FIFO interface. Take the engine out of GSI/DMA mode and
+-		 * force the default interface.
++		 * ABL (and TWRP's kernel) ran SE13 with the GSI/DMA engine,
++		 * which disables the FIFO interface.  Linux takes a QUP back
++		 * to FIFO mode with plain GENI registers only -
++		 * geni_se_io_init + geni_se_io_set_mode +
++		 * geni_se_select_fifo_mode - and the FIFO interface
++		 * re-enables implicitly (FIFO_IF_DISABLE_RO then reads 0).
++		 * An earlier version wrote a guessed 0x2000 "clock ctrl"
++		 * page instead; that page is not implemented on this GENI
++		 * and the write hung the AXI interconnect (system kept
++		 * running, the touch thread died mid-sequence).
+ 		 */
+-		touch_wr(st.se, 0xe18, 0);  /* no GSI events */
+-		touch_wr(st.se, 0xe1c, 0);  /* mask GSI IRQ routing */
++		touch_wr(st.se, 0xe18, 0);  /* SE_GSI_EVENT_EN: no GSI events */
++		touch_wr(st.se, SE_IRQ_CLR, 0xffffffffu); /* M_IRQ_CLEAR */
++		touch_wr(st.se, 0x648, 0xffffffffu);      /* S_IRQ_CLEAR */
++		touch_wr(st.se, 0xc44, 0xffffffffu);      /* SE_DMA_TX_IRQ_CLR */
++		touch_wr(st.se, 0xd44, 0xffffffffu);      /* SE_DMA_RX_IRQ_CLR */
+ 		touch_wr(st.se, SE_DMA, 0); /* SE_GENI_DMA_MODE_EN: FIFO mode */
+-		touch_wr(st.se, 0x28, touch_rd(st.se, 0x28) | 0x7fu);
+ 		touch_wr(st.se, 0x20, 1u);  /* GENI_FORCE_DEFAULT */
+-#if defined(UMI)
+-		/*
+-		 * Linux's geni_load_se_fw() clocks the wrapper's AHB master
+-		 * and common CGC before touching the DFE block. Without this
+-		 * the DFE is unclocked and a 0x2000/0x2008 access stalls the
+-		 * interconnect (display and keys freeze too).
+-		 */
+-		printf("SWEET TOUCH: wrapper cfg %#x %#x %#x\n",
+-		    touch_rd(st.wrap, 0x118), touch_rd(st.wrap, 0x120),
+-		    touch_rd(st.wrap, 0x21c));
+-		touch_wr(st.wrap, 0x118, touch_rd(st.wrap, 0x118) | 1u);
+-		touch_wr(st.wrap, 0x120, touch_rd(st.wrap, 0x120) | 1u);
+-		touch_wr(st.wrap, 0x21c, touch_rd(st.wrap, 0x21c) | 1u);
+-		printf("SWEET TOUCH: wrapper cfg now %#x %#x %#x\n",
+-		    touch_rd(st.wrap, 0x118), touch_rd(st.wrap, 0x120),
+-		    touch_rd(st.wrap, 0x21c));
+-		printf("SWEET TOUCH: selecting serial clock\n");
+-		touch_wr(st.se, 0x2000, 1u); /* SE_GENI_CLK_CTRL.SER_CLK_SEL */
+-		touch_wr(st.se, 0x2004, 0);  /* SE_DMA_IF_EN */
+-		touch_wr(st.se, 0x2008, 0);  /* SE_FIFO_IF_DISABLE */
+ 		ifdis = touch_rd(st.se, 0x64);
+-		printf("SWEET TOUCH: FIFO mode -> 0x2008=%#x 0x64=%#x\n",
+-		    touch_rd(st.se, 0x2008), ifdis);
+-#endif
++		printf("SWEET TOUCH: GSI exit -> if_disable=%#x (0 = FIFO on)\n",
++		    ifdis);
++		if (ifdis & 1u) {
++			printf("SWEET TOUCH: FIFO interface still off; probes skipped\n");
++			return false;
++		}
+ 	}
+ 	printf("SWEET TOUCH: se7 fw=%#x proto=%u status=%#x tx=%#x rx=%#x ios=%#x\n",
+ 	    fw, (fw >> 8) & 0xffu, touch_rd(st.se, SE_STATUS), tx, rx,
+@@ -905,10 +1137,36 @@ touch_se_init(void)
  		printf("SWEET TOUCH: packing readback mismatch; probes skipped\n");
  		return false;
  	}
@@ -325,7 +416,7 @@ index 2d74a77..89d1b6f 100644
  	}
  	return true;
  }
-@@ -947,13 +1203,15 @@ touch_thread(void *arg, wait_result_t result)
+@@ -947,13 +1205,15 @@ touch_thread(void *arg, wait_result_t result)
  #if defined(UMI)
  	if (st.bb) {
  		printf("SWEET TOUCH: bit-bang mode; skipping SE13\n");
@@ -345,7 +436,7 @@ index 2d74a77..89d1b6f 100644
  		}
  	}
  #else
-@@ -1010,6 +1268,7 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1010,6 +1270,7 @@ touch_thread(void *arg, wait_result_t result)
  	    ge, gid[0], gid[1], gid[2], gid[3], gid[8], gid[9], gid[10], gid[11], st.irq_status);
  	(void)touch_probe_info(0x8240, legacy);
  #if defined(UMI)
@@ -353,7 +444,7 @@ index 2d74a77..89d1b6f 100644
  	uint8_t fevt[8] = {0};
  	for (int i = 0; i < 16; ++i) {
  		if (touch_read(TOUCH_FTS_ADDR, 0x86, false, fevt, sizeof(fevt)) || fevt[0] == 0) {
-@@ -1019,15 +1278,26 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1019,15 +1280,26 @@ touch_thread(void *arg, wait_result_t result)
  			break;
  		}
  	}
@@ -384,7 +475,7 @@ index 2d74a77..89d1b6f 100644
  	st.probing = false;
  	bool goodix = !ge && gid[0] == '9' && gid[1] == '8' && gid[2] == '9' && (gid[3] == '6' || gid[3] == '9');
  	bool fts = !fe;
-@@ -1057,9 +1327,10 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1057,9 +1329,10 @@ touch_thread(void *arg, wait_result_t result)
  	    TOUCH_MAX_X + 1, TOUCH_MAX_Y + 1, st.irq_hint);
  	unsigned errors = 0, ticks = 0;
  	while (!st.dead) {
@@ -396,7 +487,7 @@ index 2d74a77..89d1b6f 100644
  			int err = st.kind == TOUCH_GOODIX ? touch_goodix() : touch_focaltech();
  			if (err) {
  				if ((errors++ % 100u) == 0) {
-@@ -1072,6 +1343,68 @@ touch_thread(void *arg, wait_result_t result)
+@@ -1072,6 +1345,68 @@ touch_thread(void *arg, wait_result_t result)
  				errors = 0;
  			}
  		}
