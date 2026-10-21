@@ -1,5 +1,20 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+## Touch failure and CI optimization follow-up
+
+- User reports clean touch image failed. Recovery ring saved as
+  `logs/clean-touch-failed.txt`: only `UMI FTS: initialization failed`, no
+  chip-ID/controller-ready diagnostic. Failure is early in initialization;
+  exact I2C stage remains unproven. Added transfer diagnostics and nine-clock
+  bus recovery, and fixed motion reporting (previously overwrote stored
+  coordinates before comparison). This is still the new independent 0083.
+- Run 39602947805 timing: Build 421 s, Deps 8 s; full job about 455 s.
+  Workflow now caches the fixed 13.5 KDK and toolchain-keyed MIG/CTF host
+  executable directories. Kernel headers/objects remain fresh. Build tree
+  and KDK library diagnostics become opt-in or automatic on build failure.
+  Normal kernel artifact excludes the bulky .link directory. Improvements
+  are pending cold/warm CI measurement; no timing guarantee is established.
+
 ## Clean UMI touch build: 2026-10-21 19:59 WIB
 
 - Branch `umi-touch-clean`, source `3d1fac1`: fresh 0083 GPIO-I2C ST FTS521

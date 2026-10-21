@@ -15,6 +15,10 @@ on:
       keep_going:
         description: make -k (collect all compile errors in one run)
         default: "true"
+      diagnostics:
+        description: Package build tree and inspect KDK libraries (automatic on failure)
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -67,7 +71,39 @@ jobs:
           xcodebuild -version
           xcrun --find iig
 
+      # choose_xnu() skips downloading/installing a KDK when it already exists.
+      # Keep this cache independent of board patches and kernel sources.
+      - name: Prepare KDK cache directory
+        if: env.MACOS_VERSION == '13.5'
+        run: |
+          sudo mkdir -p /Library/Developer/KDKs
+          sudo chown "$(id -un)" /Library/Developer/KDKs
+
+      - name: Restore KDK
+        if: env.MACOS_VERSION == '13.5'
+        uses: actions/cache@v4
+        with:
+          path: /Library/Developer/KDKs/KDK_13.5_22G74.kdk
+          key: kdk-v1-${{ runner.os }}-${{ runner.arch }}-13.5-22G74
+
+      # Cache host tools only. Generated kernel headers and object files must
+      # be rebuilt from the current patch series.
+      - name: Identify host toolchain
+        id: toolchain
+        run: |
+          identity=$( { xcodebuild -version; xcrun --sdk macosx --show-sdk-version; } | shasum -a 256 | cut -d ' ' -f 1)
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      - name: Restore MIG and CTF tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            dxb/fakeroot/usr/local/bin
+            dxb/fakeroot/usr/local/libexec
+          key: host-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.DXB_SHA }}-${{ env.MACOS_VERSION }}-${{ steps.toolchain.outputs.identity }}
+
       - name: Build
+        id: kernel-build
         working-directory: dxb
         env:
           # keep going after errors so one run reports every compile failure
@@ -75,7 +111,7 @@ jobs:
         run: bash build.sh
 
       - name: Package build tree for local compiles
-        if: always()
+        if: always() && (inputs.diagnostics == true || steps.kernel-build.outcome == 'failure')
         run: |
           # Generated headers, config option headers, mig output and the patched
           # source: enough to re-run any single compile command from the log locally.
@@ -90,14 +126,14 @@ jobs:
           ls -la buildtree.tgz
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && (inputs.diagnostics == true || steps.kernel-build.outcome == 'failure')
         with:
           name: xnu-buildtree
           path: buildtree.tgz
           retention-days: 7
 
       - name: Inspect closed KDK support libs
-        if: always()
+        if: always() && (inputs.diagnostics == true || steps.kernel-build.outcome == 'failure')
         run: |
           mkdir -p out/kdk-libs
           for lib in /Library/Developer/KDKs/*/System/Library/KernelSupport/lib*.a; do
@@ -112,7 +148,9 @@ jobs:
         if: always()
         run: |
           mkdir -p out
-          cp -R dxb/fakeroot/System/Library/Kernels/. out/ 2>/dev/null || true
+          kernel="dxb/fakeroot/System/Library/Kernels/kernel.$(echo "$KERNEL_CONFIG.$MACHINE_CONFIG" | tr '[:upper:]' '[:lower:]')"
+          test -s "$kernel"
+          cp "$kernel" out/
           ls -la out
           (cd out && shasum -a 256 kernel.* > SHA256SUMS) || true
 
