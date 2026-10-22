@@ -110,12 +110,15 @@ static int tp_xfer(const uint8_t *tx, unsigned nt, uint8_t *rx, unsigned nr)
 #if defined(UMI_PANEL_SYNC_PROBE)
 #include "umi_panel_sync_probe.h"
 #endif
+#include "umi_touch_supply_probe.h"
 static void umi_touch_probe(void)
 {
     con_clear(BLUE);
     con_str("UMI TOUCH", "pre-XNU direct GPIO diagnostic; no iOS boot");
+    tp_supply_snapshot("L1 PRIOR");
     int err = sweet_rpmh_vreg_enable("ldoc1", 1800);
     con_hex("VDD vote errno", err);
+    tp_supply_snapshot("L1 AFTER");
     if (err) { delay_ms(15000); return; }
     tp_output(38, false); tp_output(69, true); delay_ms(20);
     tp_line(36, true); tp_line(37, true);
@@ -199,6 +202,17 @@ static void umi_touch_probe(void)
                     hash = (hash ^ frame[i]) * 16777619u;
                 if (samples && hash != previous) ++changes;
                 previous = hash; ++samples;
+                if (samples == 1) {
+                    con_hex2("RAW DATA", "word0=", frame[0] | (frame[1] << 8),
+                        "word1=", frame[2] | (frame[3] << 8));
+                    int min=32767, max=-32768;
+                    for (unsigned i=0; i<sizeof(frame); i+=2) {
+                        int v=(int16_t)(frame[i] | (frame[i+1] << 8));
+                        if (v<min) min=v;
+                        if (v>max) max=v;
+                    }
+                    con_hex2("RAW RANGE", "min=", min, "max=", max);
+                }
             }
             sample = now() + rsr("cntfrq_el0") / 4;
         }

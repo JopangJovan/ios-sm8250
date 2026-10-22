@@ -2,6 +2,26 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Photo IMG20261022101950.jpg: DSIversion20040000/CTRL1f5, all3 DSI TX
+  errno0/status503; SYNC ERR0. After TSP replay, events7/fingers0/errors0,
+  RAW hash935025C5/changes0. Vendor sync replay did NOT restore scan data.
+  Completion is hardware-transfer status, not panel readback confirmation.
+- Reconnected recovery. Read-only PMIC reference through regmap selectors
+  (not writes to data): PM8150L regulator is SID5 peripheral40, not SID4.
+  `logs/twrp-pm8150l-ldo1-reference.txt`: 4040/41=08/07 (1800mV), mode4044=07,
+  enable4046=80, status4008=84. Regmap SID4 yielded XX (not regulator block).
+- Added `shim/umi_touch_supply_probe.h`: hard-whitelisted SID5 peripheral40
+  observer EXT_READL only, matching proven key driver APID mapping/transport;
+  prints programmed voltage/mode/enable/status before and after RPMh vote.
+  Bounded timeout poisons observer reads; no PMIC config/IRQ acknowledge writes.
+  Also prints raw first2words/min/max, since hash alone hides raw content.
+  This verifies programmed state, not measured voltage/analog integrity.
+- Built without PANEL_SYNC flag: `shim/out/shim-boot-umi-touch-supply-readback.img`
+  SHA256 `d32c0f7bcad6d38ec79db7fbf3eb24e772c51d3d722c76f9f7e04aa1648ab67e`.
+  Local cross-compile, relocation guard, diff-check, repo validation passed.
+  Fastboot product umi, send0.035s/boot0.096s OKAY; photo needed of L1 PRIOR/AFTER/STATE and
+  RAW DATA/RANGE. No workflow dispatched, original checkout untouched.
+
 - Autonomous follow-up: matched live panel_info to Samsung J2 P2.1 38/0c/0a.
   Vendor DTS explicitly has TSP SYNC B9 separately from display TE 35.
   `tools/umi-panel-sync-read.sh` sends only documented F0 unlock/relock and
