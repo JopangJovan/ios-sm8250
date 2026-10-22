@@ -2,6 +2,36 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Photo IMG20261022103128.jpg cold scan replay failed: MODE0000500f/020e01
+  matches recovery, INIT0, events6/fingers0/errors0, RAWC262/hash935025C5,
+  samples113/changes0. Cold scan-profile timing alone did not fix the issue.
+- User provided stock Android13 V816.0.3.0.TJBCNXM dump URL at
+  https://dumps.tadiphone.dev/dumps/xiaomi/umi/tree/missi_phonenonab_cn-user-13-TKQ1.221114.001-V816.0.3.0.TJBCNXM-release-keys/ .
+  Web renderer failed, public GitLab API works. Downloaded only file index,
+  stock base DTB + UMI overlay + kallsyms into ignored work/umi-stock-dump.
+  Merged DTBs locally with fdtoverlay. Touch address49, GPIO38reset/39irq,
+  GPIO69 AVDD switch, ldoc1/1800mV agree with live recovery, not a pinmap fix.
+  Base SHA256cb3c871d8d2cc2363d5d11fafcc36a6db06bf93c80e038dcdf1df6a022e73324;
+  overlayd9f398abb4d73d438940742232d879244ac0add743f8daf9fd348b9992a4058b.
+- Running recovery DTB exported read-only to work/recovery-trace/running-twrp.*
+  confirms same GPIO69 even after overlays. GPIO debug file has LOCAL numbers
+  (gpio36 etc), not gpio-1136 format. It does provide decoded pin state;
+  read-only raw /dev/mem,/proc/kcore absent. Do not claim all inspection absent.
+  Native GPIO36/37 input high2mA/no-pull, reset38 out high8mA/pullup,
+  irq39 in high8mA/pullup, GPIO69 out high2mA/pulldown.
+- Stock DT always-on vdd_boost_vreg: PM8150B GPIO5, activehigh/startup4ms.
+  No explicit parent linkage to touch AVDD; role UNKNOWN. TWRP has it high.
+  logs/twrp-pm8150b-gpio5-reference.txt: SID2 C408=80, C440=01,C441=01,
+  C442=05,C444=80,C445=03,C446=80. Next compare bare-metal programmed state
+  BEFORE considering any write; do not assume it is the touch source.
+- Added ONLY observer EXT_READL checks for whitelisted PPID2c4 regs alongside
+  existing PPID540 checks; timeout quarantine separate per bank. No PMIC
+  config writes. Next photo needs BOOST ERR and BOOST mode/out,en/stat.
+  Image shim/out/shim-boot-umi-touch-boost-readback.img SHA256
+  a20a8b6b51701fa3dbbdaa4e3c189cd5c189d168c2be1b30e65ca9dc11cb1fc8.
+  Local cross-compile/relocation guard/repo validation pass, no workflow.
+  Temporary boot initiated; hardware result awaits human observation.
+
 - Recovery reconnected. Added --reset-scan-cycle to snapshot tool: known
   FA2000002480 soft reset, drains fresh ready03, raw reads before scan then
   A00001. `logs/twrp-reset-raw-reference.txt`: old noisy raw buffer retained

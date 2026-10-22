@@ -115,6 +115,7 @@ static void umi_touch_probe(void)
 {
     con_clear(BLUE);
     con_str("UMI TOUCH", "pre-XNU direct GPIO diagnostic; no iOS boot");
+    tp_boost_snapshot();
     tp_supply_snapshot("L1 PRIOR");
     int err = sweet_rpmh_vreg_enable("ldoc1", 1800);
     con_hex("VDD vote errno", err);
