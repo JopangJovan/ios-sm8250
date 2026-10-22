@@ -2,6 +2,27 @@
 
 ## Touch failure and CI optimization follow-up
 
+- 2026-10-22 follow-up: user reports cold-start still fails, device TWRP.
+  `logs/clean-touch-coldstart-failed.txt`: chip3639/init succeeds, expected
+  7 events, no fingers, errors0, panel TE edges present. Cold AVDD/reset
+  cycling did not fix touch. No new workflow dispatched.
+- Added opt-in standalone pre-XNU shim diagnostic `shim/umi_touch_probe.h`.
+  Builds on Linux in <1s, no XNU payload/UFS access, returns to fastboot.
+  Reuses applied clean RPMh helper (headers removed only; identity mapping,
+  timer delay, quiet printf adapter); bounded ldoc1 1800mV whitelist preserved.
+  GPIO36/37 open-drain bitbang, reset38, AVDD69, IRQ39, captured scan/feature
+  sequence, batched FIFO, on-screen event/finger/error counts for60s+15s.
+  Reproduction: `UMI_TOUCH_PROBE=1 UMI_TOUCH_PROBE_RPMH=$PWD/work/xnu-patchgen/bsd/dev/sweet_rpmh.c BOARD=umi ./shim/build.sh`.
+  RPMh input SHA256 `68d5c40009e866147588b0cd603a6a095133038b8341ee4ea41ece6cfb8debcb`.
+  Note this is a small independent probe, not byte-identical XNU execution;
+  success would narrow the environment difference, not prove HID works.
+- Probe image `shim/out/shim-boot-umi-touch-probe.img`, SHA256
+  `6878a2a1380b3b367600aee35a6a486db3cb7c722f0b6a89a1a0075543eb789b`.
+  Temporary fastboot boot accepted (product umi, send0.036s/boot0.102s).
+  Await user's photograph/counters; no functional result established yet.
+  Local cross-compile, ABS64 relocation guard, diff-check, repository checks
+  pass. Default shim behavior unchanged. Original checkout untouched.
+
 - 2026-10-22 local GPIO replay investigation: initial failure was confounded
   by GENI's active pinmux. Waiting 500ms after F0 for runtime-PM pin release
   fixed transfers. User swiped: GPIO replay events3095/fingers2840/empty2245;

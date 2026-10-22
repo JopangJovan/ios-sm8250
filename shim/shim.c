@@ -107,10 +107,14 @@ static void delay_ms(unsigned ms)
 		;
 }
 
+#if defined(BOARD_UMI) && defined(UMI_TOUCH_PROBE)
+#include "umi_touch_probe.h"
+#endif
+
 static void __attribute__((noreturn)) reset(unsigned after_s)
 {
 	con_skip();
-	con_str("RESET", after_s > 20 ? "in 40s" : "in 20s");
+	con_str("RESET", after_s == 0 ? "now" : after_s > 20 ? "in 40s" : "in 20s");
 	delay_ms(after_s * 1000);
 	wr32(IMEM_RESTART_REASON, RESTART_BOOTLOADER);
 	__asm__ volatile("dsb sy" ::: "memory");
@@ -385,6 +389,10 @@ void shim_main(uint64_t dtb)
 	con_clear(RED);
 	con_str("SHIM", "sweet milestone 4: xnu loader");
 	con_skip();
+#if defined(BOARD_UMI) && defined(UMI_TOUCH_PROBE)
+	umi_touch_probe();
+	reset(0);
+#endif
 #if defined(BOARD_UMI) && defined(UMI_TOUCH_COLD_START)
 	/* Optional startup experiment, built locally: leave only the UMI touch
 	 * reset (38) and analog-supply switch (69) low for XNU's power sequence.

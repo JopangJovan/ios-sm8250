@@ -21,6 +21,16 @@ case "${UMI_TOUCH_COLD_START:-0}" in
        CFLAGS="$CFLAGS -DUMI_TOUCH_COLD_START" ;;
     *) echo 'UMI_TOUCH_COLD_START must be 0 or 1' >&2; exit 1 ;;
 esac
+case "${UMI_TOUCH_PROBE:-0}" in
+    0) ;;
+    1) [ "$BOARD" = umi ] || exit 1
+       : "${UMI_TOUCH_PROBE_RPMH:?set to the applied clean sweet_rpmh.c}"
+       sed '/^#include /d' "$UMI_TOUCH_PROBE_RPMH" > out-touch-rpmh.tmp
+       mkdir -p out
+       mv out-touch-rpmh.tmp out/umi-touch-rpmh.inc
+       CFLAGS="$CFLAGS -DUMI_TOUCH_PROBE -mno-outline-atomics" ;;
+    *) echo 'UMI_TOUCH_PROBE must be 0 or 1' >&2; exit 1 ;;
+esac
 mkdir -p out
 for f in start.S shim.c console.c mmu.c fdt.c loader.c ufs.c; do
 	$CC $CFLAGS -c $f -o out/${f%.*}.o

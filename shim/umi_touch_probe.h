@@ -1,0 +1,177 @@
+/* Local, opt-in pre-XNU diagnostic. No firmware/flash or UFS writes.
+ * Reuses the applied clean RPMh helper, retaining its whitelist/timeout checks.
+ * Test owns only touch SDA36/SCL37/reset38/AVDD69 until reboot to fastboot.
+ */
+#include <stdbool.h>
+#include <stddef.h>
+#include <errno.h>
+typedef uintptr_t vm_offset_t;
+typedef uintptr_t vm_size_t;
+static vm_offset_t ml_io_map(vm_offset_t p, vm_size_t n) { (void)n; return p; }
+static void delay(unsigned us)
+{
+    uint64_t end = now() + (rsr("cntfrq_el0") * us + 999999) / 1000000;
+    while (now() < end) { }
+}
+static int probe_strcmp(const char *a, const char *b)
+{
+    while (*a && *a == *b) { ++a; ++b; }
+    return (unsigned char)*a - (unsigned char)*b;
+}
+static int probe_log(const char *fmt, ...) { (void)fmt; return 0; }
+#define strcmp probe_strcmp
+#define printf probe_log
+#define ARM64_BOARD_CONFIG_SWEET 1
+#define ARM64_BOARD_CONFIG_UMI 1
+#include "out/umi-touch-rpmh.inc"
+#undef printf
+#undef strcmp
+
+static uintptr_t tp_pad(unsigned n) { return 0x0f500000UL + n * 0x1000UL; }
+static void tp_write(uintptr_t p, uint32_t v)
+{
+    wr32(p, v);
+    __asm__ volatile("dsb sy" ::: "memory");
+}
+static unsigned tp_get(unsigned n) { return rd32(tp_pad(n) + 4) & 1; }
+/* Open drain: never drive SDA/SCL high. Release uses GPIO input+pull-up. */
+static void tp_line(unsigned n, bool high)
+{
+    uintptr_t p = tp_pad(n);
+    uint32_t cfg = rd32(p) & ~0x3ffu;
+    if (!high) tp_write(p + 4, rd32(p + 4) & ~2u);
+    tp_write(p, cfg | (high ? 3u : 0x200u));
+    delay(5);
+}
+static void tp_output(unsigned n, bool high)
+{
+    uintptr_t p = tp_pad(n);
+    tp_write(p + 4, (rd32(p + 4) & ~2u) | (high ? 2u : 0));
+    tp_write(p, (rd32(p) & ~0x3ffu) | 0x200u);
+}
+static int tp_clock(void)
+{
+    tp_line(37, true);
+    for (unsigned i = 0; i < 1000; ++i) {
+        if (tp_get(37)) return 0;
+        delay(1);
+    }
+    return -1;
+}
+static int tp_start(void)
+{
+    tp_line(36, true);
+    if (tp_clock() || !tp_get(36)) return -1;
+    tp_line(36, false); tp_line(37, false);
+    return 0;
+}
+static void tp_stop(void)
+{
+    tp_line(36, false); (void)tp_clock(); tp_line(36, true);
+}
+static int tp_send(uint8_t b)
+{
+    for (unsigned i = 0; i < 8; ++i) {
+        tp_line(36, (b & 0x80) != 0); b <<= 1;
+        if (tp_clock()) return -1;
+        tp_line(37, false);
+    }
+    tp_line(36, true);
+    if (tp_clock()) return -1;
+    int err = tp_get(36) ? -1 : 0;
+    tp_line(37, false);
+    return err;
+}
+static int tp_xfer(const uint8_t *tx, unsigned nt, uint8_t *rx, unsigned nr)
+{
+    int err = tp_start();
+    if (!err) err = tp_send(0x92);
+    for (unsigned i = 0; !err && i < nt; ++i) err = tp_send(tx[i]);
+    if (!err && nr) {
+        err = tp_start();
+        if (!err) err = tp_send(0x93);
+    }
+    for (unsigned i = 0; !err && i < nr; ++i) {
+        uint8_t b = 0;
+        tp_line(36, true);
+        for (unsigned j = 0; j < 8; ++j) {
+            if (tp_clock()) { err = -1; break; }
+            b = (b << 1) | tp_get(36); tp_line(37, false);
+        }
+        rx[i] = b;
+        if (!err) {
+            tp_line(36, i + 1 == nr);
+            err = tp_clock(); tp_line(37, false);
+        }
+    }
+    tp_stop();
+    return err;
+}
+static void umi_touch_probe(void)
+{
+    con_clear(BLUE);
+    con_str("UMI TOUCH", "pre-XNU direct GPIO diagnostic; no iOS boot");
+    int err = sweet_rpmh_vreg_enable("ldoc1", 1800);
+    con_hex("VDD vote errno", err);
+    if (err) { delay_ms(15000); return; }
+    tp_output(38, false); tp_output(69, true); delay_ms(20);
+    tp_line(36, true); tp_line(37, true);
+    for (unsigned i = 0; i < 9; ++i) { tp_line(37, false); (void)tp_clock(); }
+    tp_stop(); tp_output(38, true); delay_ms(100);
+    uint8_t chipcmd[] = {0xfa, 0x20, 0, 0, 0}, id[4] = {0};
+    err = tp_xfer(chipcmd, sizeof(chipcmd), id, sizeof(id));
+    con_hex2("CHIP", "errno=", err, "id=", (id[0] << 8) | id[1]);
+    if (err || id[0] != 0x36 || id[1] != 0x39) { delay_ms(15000); return; }
+    tp_write(tp_pad(39), (rd32(tp_pad(39)) & ~0x3ffu) | 0xc3u);
+    uint8_t fifo = 0x86, packet[8], batch[31 * 8];
+    /* Drain fresh reset status before applying the captured recovery sequence. */
+    for (unsigned i = 0; i < 32; ++i) {
+        if (tp_xfer(&fifo, 1, packet, 8) || !packet[0]) break;
+    }
+    uint8_t scan[] = {0xa0, 0, 1}, feature[] = {0xa2, 0, 0};
+    uint8_t gestures[] = {0xa2, 3, 0, 0, 0, 3};
+    err = tp_xfer(scan, 3, NULL, 0);
+    for (unsigned i = 0; !err && i < 3; ++i) {
+        feature[1] = i; err = tp_xfer(feature, 3, NULL, 0);
+    }
+    if (!err) err = tp_xfer(scan, 3, NULL, 0);
+    if (!err) err = tp_xfer(gestures, 6, NULL, 0);
+    con_hex("INIT errno", err);
+    if (err) { delay_ms(15000); return; }
+    con_str("TEST", "SWIPE NOW for 60 seconds; then returns to fastboot");
+    unsigned events = 0, fingers = 0, errors = 0;
+    uint64_t end = now() + rsr("cntfrq_el0") * 60, report = now();
+    while (now() < end) {
+        if (!tp_get(39)) {
+            err = tp_xfer(&fifo, 1, packet, 8);
+            if (err) ++errors;
+            else if (packet[0]) {
+                unsigned remaining = packet[7] & 31;
+                if (remaining && tp_xfer(&fifo, 1, batch, remaining * 8)) {
+                    ++errors; remaining = 0;
+                }
+                for (unsigned i = 0; i <= remaining; ++i) {
+                    const uint8_t *p = i ? batch + (i - 1) * 8 : packet;
+                    if (!p[0]) continue;
+                    ++events;
+                    if (p[0] == 0x13 || p[0] == 0x23 || p[0] == 0x33) {
+                        ++fingers;
+                        if (fingers % 100 == 1)
+                            con_hex2("FINGER", "x=", ((p[3] & 15) << 8) | p[2],
+                                "y=", (p[4] << 4) | (p[3] >> 4));
+                    }
+                }
+            }
+        }
+        if (now() >= report) {
+            con_hex2("COUNTS", "events=", events, "fingers=", fingers);
+            con_hex2("BUS", "errors=", errors, "irq=", tp_get(39));
+            report = now() + rsr("cntfrq_el0") * 5;
+        }
+        delay_ms(8);
+    }
+    con_str("DONE", "Photograph these counters. Rebooting in 15 seconds.");
+    con_hex2("FINAL", "events=", events, "fingers=", fingers);
+    con_hex("ERRORS", errors);
+    delay_ms(15000);
+}
