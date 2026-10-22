@@ -391,6 +391,9 @@ void shim_main(uint64_t dtb)
 	con_skip();
 #if defined(BOARD_UMI) && defined(UMI_TOUCH_PROBE)
 	umi_touch_probe();
+#if defined(UMI_BOOST_ENABLE_PROBE)
+	tp_boost_restore_probe();
+#endif
 	reset(0);
 #endif
 #if defined(BOARD_UMI) && defined(UMI_TOUCH_COLD_START)

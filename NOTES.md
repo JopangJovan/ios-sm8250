@@ -2,6 +2,28 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Photo IMG20261022104302.jpg: BOOST ERR0; mode/out0100, en/stat8080.
+  TWRP reference0180/8080 differs in C444 bit7. Vendor pinctrl-spmi-gpio.c
+  defines MV GPIO DIGITAL_OUTPUT=1 and C444 OUTPUT_INVERT bit7, deriving
+  out_value from it. Thus output-level programming differs, not just status.
+  The always-on boost's physical relationship to touch remains UNKNOWN.
+- Added opt-in UMI_BOOST_ENABLE_PROBE=1 only with touch probe. Only PMIC
+  config target is SID2/GPIO5/C444, accepted values00/80. Guards subtype11,
+  mode1, VIN1, enabled80, source0, exactly one apps-owned write APID. Uses
+  source-backed v5 channels0xc600000 + APID*0x10000, WDATA0+10,
+  EXT_WRITEL one-byte CMD440; bounded1000us poll, readback check, quarantine
+  on uncertainty. No retry, no mode/VIN/enable/other-peripheral writes.
+  Raises the stock always-on enable before touch startup, waits5ms (DT4ms).
+  Restores original low at end via shim wrapper, including early probe return;
+  timeout quarantine may prevent restore, then resets to bootloader normally.
+  This is an opt-in diagnostic, not an established touch fix; default read
+  probe remains read-only. No Linux/TWRP regulator disable experiment done.
+- Built image shim/out/shim-boot-umi-touch-boost-enable.img SHA256
+  ecd4c806d7e559d2123b03d2bbb3ee419ec8e3ee6899f3ea9065f8a805bec444.
+  Cross-compile/relocation guard/diff-check/repo validation pass. No workflow.
+  Temporary boot initiated from verified recovery; human swipes/photo of
+  BOOST SET/readback/final counts required before any production integration.
+
 - Photo IMG20261022103128.jpg cold scan replay failed: MODE0000500f/020e01
   matches recovery, INIT0, events6/fingers0/errors0, RAWC262/hash935025C5,
   samples113/changes0. Cold scan-profile timing alone did not fix the issue.

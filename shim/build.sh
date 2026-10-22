@@ -44,6 +44,12 @@ case "${UMI_FTS_COLD_REPLAY:-0}" in
        CFLAGS="$CFLAGS -DUMI_FTS_COLD_REPLAY" ;;
     *) echo 'UMI_FTS_COLD_REPLAY must be 0 or 1' >&2; exit 1 ;;
 esac
+case "${UMI_BOOST_ENABLE_PROBE:-0}" in
+    0) ;;
+    1) [ "${UMI_TOUCH_PROBE:-0}" = 1 ] || { echo 'boost enable probe requires touch probe' >&2; exit 1; }
+       CFLAGS="$CFLAGS -DUMI_BOOST_ENABLE_PROBE" ;;
+    *) echo 'UMI_BOOST_ENABLE_PROBE must be 0 or 1' >&2; exit 1 ;;
+esac
 for f in start.S shim.c console.c mmu.c fdt.c loader.c ufs.c; do
 	$CC $CFLAGS -c $f -o out/${f%.*}.o
 done
