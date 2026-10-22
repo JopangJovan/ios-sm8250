@@ -1,6 +1,6 @@
 /* PM8150L L1, SID5 peripheral40: observer EXT_READL only, matching the
  * existing key driver's proven v5 SPMI transport. Read-only by default;
- * UMI_BOOST_ENABLE_PROBE below explicitly enables one whitelisted GPIO write.
+ * UMI_BOOST_ENABLE_PROBE below explicitly enables two whitelisted GPIO fields.
  * This reads programmed state/status, not an electrical voltage measurement.
  */
 static bool tp_supply_poisoned[2];
@@ -42,14 +42,17 @@ static void tp_boost_snapshot(void)
 {
     /* Stock always-on vdd_boost_vreg: PM8150B GPIO5. Read only; its
      * relationship to touch AVDD is not established by the device tree. */
-    uint8_t mode=0, output=0, enable=0, status=0;
+    uint8_t mode=0, output=0, enable=0, status=0, subtype=0, vin=0;
     int err = tp_supply_read_ppid(0x2c4, 0x40, &mode);
     if (!err) err = tp_supply_read_ppid(0x2c4, 0x44, &output);
     if (!err) err = tp_supply_read_ppid(0x2c4, 0x46, &enable);
     if (!err) err = tp_supply_read_ppid(0x2c4, 0x08, &status);
+    if (!err) err = tp_supply_read_ppid(0x2c4, 0x05, &subtype);
+    if (!err) err = tp_supply_read_ppid(0x2c4, 0x41, &vin);
     con_hex("BOOST ERR", err);
     if (!err) con_hex2("BOOST", "mode/out=", (mode << 8) | output,
         "en/stat=", (enable << 8) | status);
+    if (!err) con_hex2("BDETAIL", "subtype=", subtype, "vin=", vin);
 }
 static void tp_supply_snapshot(const char *label)
 {
@@ -64,25 +67,29 @@ static void tp_supply_snapshot(const char *label)
 }
 
 #if defined(UMI_BOOST_ENABLE_PROBE)
-/* Sole opt-in PMIC write: SID2 GPIO5's output value, C444, 00 <-> 80.
- * Stock UMI DT marks this regulator always-on. No other PMIC writes allowed.
- * GPIO must already match measured MV/output/VIN1/enabled configuration.
- * Restore original low after diagnostic; timeout quarantines writes.
+/* Opt-in PMIC writes restricted to SID2 GPIO5 C441 VIN (0/1) and C444
+ * output value (00/80), matching measured recovery VIN1/output-high.
+ * Stock UMI DT marks this regulator always-on. No other writes allowed.
+ * Guard unchanged MV/output/enabled config; restore both original fields.
+ * A VIN change is permitted only while the inherited output is low.
  */
 static unsigned tp_boost_write_apid;
 static bool tp_boost_write_poisoned, tp_boost_changed;
-static int tp_boost_write_value(uint8_t value)
+static uint8_t tp_boost_saved_vin, tp_boost_saved_output;
+static int tp_boost_write_value(unsigned reg, uint8_t value)
 {
-    if (tp_boost_write_poisoned || (value != 0 && value != 0x80)) return -1;
+    if (tp_boost_write_poisoned ||
+        !((reg == 0x44 && (value == 0 || value == 0x80)) ||
+          (reg == 0x41 && (value == 0 || value == 1)))) return -1;
     uintptr_t channel = 0x0c600000UL + tp_boost_write_apid * 0x10000UL;
     tp_write(channel + 0x10, value);
-    tp_write(channel, 0x44u << 4); /* EXT_WRITEL opcode0, one byte, C444 */
+    tp_write(channel, reg << 4); /* EXT_WRITEL opcode0, one byte */
     for (unsigned i = 0; i < 1000; ++i) {
         uint32_t status = rd32(channel + 8);
         if (status & 1) {
             if (status & 14) { tp_boost_write_poisoned = true; return -2; }
             uint8_t actual=0;
-            if (tp_supply_read_ppid(0x2c4, 0x44, &actual) || actual != value) {
+            if (tp_supply_read_ppid(0x2c4, reg, &actual) || actual != value) {
                 tp_boost_write_poisoned = true; return -3;
             }
             return 0;
@@ -100,9 +107,10 @@ static int tp_boost_enable_probe(void)
         tp_supply_read_ppid(0x2c4,0x41,&vin) ||
         tp_supply_read_ppid(0x2c4,0x44,&output) ||
         tp_supply_read_ppid(0x2c4,0x46,&enable)) return -1;
-    if (subtype != 0x11 || mode != 1 || vin != 1 || enable != 0x80 ||
+    con_hex2("BGUARD", "subtype=", subtype, "vin=", vin);
+    if (subtype != 0x11 || mode != 1 || vin > 1 || enable != 0x80 ||
         (output != 0 && output != 0x80)) return -2;
-    if (output == 0x80) return 0;
+    if (output == 0x80) return vin == 1 ? 0 : -2;
     unsigned count = rd32(0x0c440004UL) & 0x7ff, matches=0;
     if (!count || count > 512) return -3;
     for (unsigned i=0; i<count; ++i) {
@@ -113,14 +121,22 @@ static int tp_boost_enable_probe(void)
         }
     }
     if (matches != 1) return -4;
-    int err=tp_boost_write_value(0x80);
+    tp_boost_saved_vin=vin; tp_boost_saved_output=output;
+    int err=0;
+    if (vin != 1) {
+        err=tp_boost_write_value(0x41, 1);
+        if (!err) tp_boost_changed=true;
+    }
+    if (!err) err=tp_boost_write_value(0x44, 0x80);
     if (!err) { tp_boost_changed=true; delay_ms(5); }
     return err;
 }
 static void tp_boost_restore_probe(void)
 {
     if (!tp_boost_changed) return;
-    int err=tp_boost_write_value(0);
+    int err=tp_boost_write_value(0x44, tp_boost_saved_output);
+    if (!err && tp_boost_saved_vin != 1)
+        err=tp_boost_write_value(0x41, tp_boost_saved_vin);
     con_hex("BRESTORE", err);
     delay_ms(1000);
 }

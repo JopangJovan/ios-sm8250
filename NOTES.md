@@ -2,6 +2,26 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Photo IMG20261022104726.jpg: BOOST SET=-2 (configuration guard), before
+  ANY PMIC write, readback unchanged0100/8080. Not a touch test result.
+  Guard fields not displayed previously were subtype/VIN; do not assert
+  which one caused rejection without next photo. Recovery adb confirmed.
+- Revised probe prints BDETAIL/BGUARD subtype+VIN. Permits VIN0->VIN1 only
+  while original output is LOW, matching measured TWRP VIN1. Still requires
+  GPIO subtype11/mode1/enable80/source0. Sole write whitelist now C441=0/1
+  and C444=00/80 on SID2 GPIO5 only; both originals restored at end, bounded
+  completion/readback/quarantine retained. Source pinctrl-spmi-gpio.c sets
+  PMIC_GPIO_REG_DIG_VIN_CTL then output source control for MV pads.
+  Other unexpected config still aborts. This is a controlled stock-state
+  matching experiment, not proof of the cause or physical boost linkage.
+- Reduced console reports to10s and first3 finger positions so final counters
+  remain visible even with extra GPIO guard lines; sampling stays250ms.
+  Local build/relocation guard/diff-check/repo validation passed.
+  Image shim/out/shim-boot-umi-touch-boost-vin.img SHA256
+  d32d100e109017bd63d2825f9578ad04dbdbcc5fe0966be25766b45ea3548b50.
+  Temporary boot initiated; await BDETAIL/BGUARD/BOOST SET/readback/final
+  counts photo and swipes. No workflow/flash/production XNU change.
+
 - Photo IMG20261022104302.jpg: BOOST ERR0; mode/out0100, en/stat8080.
   TWRP reference0180/8080 differs in C444 bit7. Vendor pinctrl-spmi-gpio.c
   defines MV GPIO DIGITAL_OUTPUT=1 and C444 OUTPUT_INVERT bit7, deriving

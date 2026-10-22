@@ -212,7 +212,7 @@ static void umi_touch_probe(void)
                     ++events;
                     if (p[0] == 0x13 || p[0] == 0x23 || p[0] == 0x33) {
                         ++fingers;
-                        if (fingers % 100 == 1)
+                        if (fingers <= 3)
                             con_hex2("FINGER", "x=", ((p[3] & 15) << 8) | p[2],
                                 "y=", (p[4] << 4) | (p[3] >> 4));
                     }
@@ -246,7 +246,7 @@ static void umi_touch_probe(void)
             con_hex2("COUNTS", "events=", events, "fingers=", fingers);
             con_hex2("BUS", "errors=", errors, "irq=", tp_get(39));
             con_hex2("RAW", "hash=", previous, "changes=", changes);
-            report = now() + rsr("cntfrq_el0") * 5;
+            report = now() + rsr("cntfrq_el0") * 10;
         }
         delay_ms(8);
     }
