@@ -15,6 +15,12 @@ CC=aarch64-linux-gnu-gcc
 OBJCOPY=aarch64-linux-gnu-objcopy
 CFLAGS="-O2 -ffreestanding -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra"
 [ "$BOARD" = umi ] && CFLAGS="$CFLAGS -DBOARD_UMI"
+case "${UMI_TOUCH_COLD_START:-0}" in
+    0) ;;
+    1) [ "$BOARD" = umi ] || { echo 'cold touch start requires BOARD=umi' >&2; exit 1; }
+       CFLAGS="$CFLAGS -DUMI_TOUCH_COLD_START" ;;
+    *) echo 'UMI_TOUCH_COLD_START must be 0 or 1' >&2; exit 1 ;;
+esac
 mkdir -p out
 for f in start.S shim.c console.c mmu.c fdt.c loader.c ufs.c; do
 	$CC $CFLAGS -c $f -o out/${f%.*}.o

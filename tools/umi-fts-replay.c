@@ -26,6 +26,7 @@ static int line(unsigned n,int high)
 {
     levels.values[n]=high;
     int r=ioctl(gpio_fd,GPIOHANDLE_SET_LINE_VALUES_IOCTL,&levels);
+    if(r)perror("GPIO set values");
     pause_bit();
     return r;
 }
@@ -39,6 +40,7 @@ static int scl_high(void)
 {
     if(line(1,1))return -1;
     for(unsigned i=0;i<1000;i++) { if(sample(1)==1)return 0;pause_bit(); }
+    fprintf(stderr,"SCL release timeout SDA=%d SCL=%d\n",sample(0),sample(1));
     return -1;
 }
 static int start(void)
@@ -49,12 +51,14 @@ static int start(void)
 static void stop(void){line(0,0);scl_high();line(0,1);}
 static int write_byte(uint8_t b)
 {
+    uint8_t original=b;
     for(unsigned i=0;i<8;i++) {
         if(line(0,!!(b&128))||scl_high()||line(1,0))return -1;
         b<<=1;
     }
     if(line(0,1)||scl_high())return -1;
     int ack=sample(0)==0;
+    if(!ack)fprintf(stderr,"NACK byte=%02x SDA=%d SCL=%d\n",original,sample(0),sample(1));
     line(1,0);
     return ack?0:-1;
 }
@@ -99,7 +103,10 @@ static int xfer(int fd, uint8_t *cmd, unsigned nc, uint8_t *buf, unsigned nb)
 int main(int argc,char **argv)
 {
     setbuf(stdout,NULL);
-    if(argc==2&&!strcmp(argv[1],"--gpio")) {
+    if(argc==2&&(!strcmp(argv[1],"--gpio")||!strcmp(argv[1],"--gpio-probe"))) {
+        /* Let GENI runtime-PM release its active pin mux after the caller's
+         * F0 transfer before requesting the same pads through GPIO. */
+        usleep(500000);
         int chip=open("/dev/gpiochip0",O_RDWR);
         struct gpiochip_info info;
         if(chip<0||ioctl(chip,GPIO_GET_CHIPINFO_IOCTL,&info)) {perror("gpiochip");return 1;}
@@ -111,6 +118,17 @@ int main(int argc,char **argv)
         if(ioctl(chip,GPIO_GET_LINEHANDLE_IOCTL,&req)) {perror("GPIO request");return 1;}
         gpio_fd=req.fd;close(chip);
         printf("GPIO open-drain idle SDA=%d SCL=%d\n",sample(0),sample(1));
+        if(!strcmp(argv[1],"--gpio-probe")) {
+            line(1,0);line(0,0);
+            printf("both low: SDA=%d SCL=%d\n",sample(0),sample(1));
+            puts("Holding both low for register inspection");
+            usleep(3000000);
+            line(0,1);
+            printf("SDA released: SDA=%d SCL=%d\n",sample(0),sample(1));
+            line(1,1);
+            printf("both released: SDA=%d SCL=%d\n",sample(0),sample(1));
+            close(gpio_fd);return 0;
+        }
     }
     int fd=open("/dev/i2c-3",O_RDWR);
     if(fd<0){perror("open");return 1;}

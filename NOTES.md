@@ -2,6 +2,20 @@
 
 ## Touch failure and CI optimization follow-up
 
+- 2026-10-22 local GPIO replay investigation: initial failure was confounded
+  by GENI's active pinmux. Waiting 500ms after F0 for runtime-PM pin release
+  fixed transfers. User swiped: GPIO replay events3095/fingers2840/empty2245;
+  vendor F1 restore returned success. Both Linux native and GPIO I2C now
+  reproduce XNU command sequence and receive fingers. No protocol fix proved.
+- Added opt-in UMI_TOUCH_COLD_START=1 shim experiment built locally in <1s.
+  Before kernel load, holds only SOUTH GPIO38 reset and GPIO69 AVDD low;
+  XNU then votes ldoc1 and enables AVDD/reset as usual. Purpose: avoid
+  inherited partially powered analog state. Hypothesis not yet established.
+  Uses existing 0090 kernel from xnu/out-touch-irq-te with scan1, no workflow.
+- Temporarily booted `shim/out/shim-boot-umi-touch-coldstart.img`, SHA-256
+  `2959e07ffd41098f2e26f5480ea8c0279ce2b7e3263551feef3bee1755369e76`.
+  Await user touch result. Default shim behavior unchanged unless env opt-in.
+
 - User asks to avoid time-consuming speculative workflows. No new workflow
   dispatched in this turn. IRQ/TE image failed; saved
   `logs/clean-touch-irq-te-failed.txt`: init7 events, no fingers, zero I2C

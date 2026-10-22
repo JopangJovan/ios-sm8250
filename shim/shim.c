@@ -385,6 +385,26 @@ void shim_main(uint64_t dtb)
 	con_clear(RED);
 	con_str("SHIM", "sweet milestone 4: xnu loader");
 	con_skip();
+#if defined(BOARD_UMI) && defined(UMI_TOUCH_COLD_START)
+	/* Optional startup experiment, built locally: leave only the UMI touch
+	 * reset (38) and analog-supply switch (69) low for XNU's power sequence.
+	 * SOUTH tile addresses are verified against the UMI DT/vendor pinctrl.
+	 * MMU is off here. No PMIC or display registers are changed. */
+	const uintptr_t touch_pads[] = {0x0f526000UL, 0x0f545000UL};
+	for (unsigned i = 0; i < 2; ++i) {
+		uintptr_t pad = touch_pads[i];
+		uint32_t cfg = rd32(pad);
+		wr32(pad + 4, rd32(pad + 4) & ~2u);
+		__asm__ volatile("dsb sy" ::: "memory");
+		cfg = (cfg & ~0x3ffu) | 0x200u;
+		if (cfg & (1u << 11)) cfg |= 1u << 12;
+		wr32(pad, cfg);
+		__asm__ volatile("dsb sy" ::: "memory");
+		con_hex2("UMI TOUCH", "pad=", pad, "io=", rd32(pad + 4));
+	}
+	delay_ms(250);
+	con_str("UMI TOUCH", "AVDD/reset held low for XNU startup");
+#endif
 	const char *why = loader_boot(dtb);
 	con_str("LOADER", why);
 	con_skip();
