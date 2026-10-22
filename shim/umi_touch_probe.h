@@ -5,14 +5,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <errno.h>
+#include "umi_touch_mmio.h"
 typedef uintptr_t vm_offset_t;
 typedef uintptr_t vm_size_t;
 static vm_offset_t ml_io_map(vm_offset_t p, vm_size_t n) { (void)n; return p; }
-static void delay(unsigned us)
-{
-    uint64_t end = now() + (rsr("cntfrq_el0") * us + 999999) / 1000000;
-    while (now() < end) { }
-}
 static int probe_strcmp(const char *a, const char *b)
 {
     while (*a && *a == *b) { ++a; ++b; }
@@ -28,11 +24,6 @@ static int probe_log(const char *fmt, ...) { (void)fmt; return 0; }
 #undef strcmp
 
 static uintptr_t tp_pad(unsigned n) { return 0x0f500000UL + n * 0x1000UL; }
-static void tp_write(uintptr_t p, uint32_t v)
-{
-    wr32(p, v);
-    __asm__ volatile("dsb sy" ::: "memory");
-}
 static unsigned tp_get(unsigned n) { return rd32(tp_pad(n) + 4) & 1; }
 /* Open drain: never drive SDA/SCL high. Release uses GPIO input+pull-up. */
 static void tp_line(unsigned n, bool high)

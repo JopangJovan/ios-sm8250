@@ -32,6 +32,14 @@ case "${UMI_TOUCH_PROBE:-0}" in
     *) echo 'UMI_TOUCH_PROBE must be 0 or 1' >&2; exit 1 ;;
 esac
 mkdir -p out
+case "${UMI_TOUCH_BOOST:-0}" in
+    0) ;;
+    1) [ "$BOARD" = umi ] && [ "${UMI_TOUCH_PROBE:-0}" = 0 ] || {
+           echo 'touch boost handoff requires BOARD=umi without diagnostic probe' >&2; exit 1;
+       }
+       CFLAGS="$CFLAGS -DUMI_TOUCH_BOOST" ;;
+    *) echo 'UMI_TOUCH_BOOST must be 0 or 1' >&2; exit 1 ;;
+esac
 case "${UMI_PANEL_SYNC_PROBE:-0}" in
     0) ;;
     1) [ "${UMI_TOUCH_PROBE:-0}" = 1 ] || { echo 'panel sync probe requires touch probe' >&2; exit 1; }

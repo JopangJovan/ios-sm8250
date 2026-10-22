@@ -54,7 +54,7 @@ static void tp_boost_snapshot(void)
         "en/stat=", (enable << 8) | status);
     if (!err) con_hex2("BDETAIL", "subtype=", subtype, "vin=", vin);
 }
-static void tp_supply_snapshot(const char *label)
+static void __attribute__((unused)) tp_supply_snapshot(const char *label)
 {
     uint8_t lo=0, hi=0, mode=0, enable=0, status=0;
     int err = tp_supply_read(0x40, &lo);
@@ -66,7 +66,7 @@ static void tp_supply_snapshot(const char *label)
     if (!err) con_hex2("L1 STATE", "mode/en=", (mode << 8) | enable, "status=", status);
 }
 
-#if defined(UMI_BOOST_ENABLE_PROBE)
+#if defined(UMI_BOOST_ENABLE_PROBE) || defined(UMI_TOUCH_BOOST)
 /* Opt-in PMIC writes restricted to SID2 GPIO5 C441 VIN (0/1) and C444
  * output value (00/80), matching measured recovery VIN1/output-high.
  * Stock UMI DT marks this regulator always-on. No other writes allowed.
@@ -131,6 +131,7 @@ static int tp_boost_enable_probe(void)
     if (!err) { tp_boost_changed=true; delay_ms(5); }
     return err;
 }
+#if defined(UMI_BOOST_ENABLE_PROBE)
 static void tp_boost_restore_probe(void)
 {
     if (!tp_boost_changed) return;
@@ -140,4 +141,5 @@ static void tp_boost_restore_probe(void)
     con_hex("BRESTORE", err);
     delay_ms(1000);
 }
+#endif
 #endif

@@ -28,6 +28,7 @@ python3 "$repo/tools/mkadt.py" "$adt" --board umi --highmem
 python3 "$repo/tools/mkpayload.py" "$kernel" "$adt" "$payload" \
     --cmdline "debug=0xc serial=3 cpus=8 keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_noconsole=1 sweetfb_hz=30 sweettouch=1 sweettouchdelay=10 sweetkeys=1 sweetusb=0 umifts_scan=$scan"
 
-(cd "$repo" && BOARD=umi DTB="$dtb" shim/build.sh ../shim/out/umi-safe-payload.bin)
+(cd "$repo" && BOARD=umi DTB="$dtb" UMI_TOUCH_BOOST="${UMI_TOUCH_BOOST:-1}" \
+    shim/build.sh ../shim/out/umi-safe-payload.bin)
 cp "$repo/shim/out/shim-boot.img" "$out"
 sha256sum "$out"

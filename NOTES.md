@@ -2,6 +2,31 @@
 
 ## Touch failure and CI optimization follow-up
 
+- BREAKTHROUGH photo IMG20261022105022.jpg: prior subtype11/VIN0,
+  boost SET0, after mode/out0180 + VIN1. First raw data variable (-142..~2000),
+  raw hashchanges, real13/23/33 fingers captured. FINAL events0x1158=4440,
+  fingers0x1026=4134, errors0, samples0x71=113, changes0x70=112.
+  This validates the combined boost GPIO5 VIN1/output-high setup in pre-XNU
+  code. It does not isolate which field alone is necessary or prove HID/iOS.
+  BRESTORE is not visible in supplied photo; code schedules restoration.
+- Avoided another kernel workflow: promoted SAME checked helper into real
+  boot shim as UMI_TOUCH_BOOST=1, mutually exclusive with standalone probe.
+  Shares umi_touch_mmio.h and same validated supply helper; guard failures
+  refuse XNU handoff. Successful handoff intentionally leaves stock always-on
+  boost VIN1/output-high so existing kernel can initialize FTS analog sensing.
+  tools/build-umi-boot.sh defaults this setup on; set UMI_TOUCH_BOOST=0 to
+  reproduce old behavior. Normal generic shim build remains opt-in/no change.
+- Built real iOS image using existing0090 kernel
+  xnu/out-touch-irq-te/kernel.development.umi, UMI_FTS_SCAN=1, cpus8, keys1,
+  touch1, delay10, USB0. No cold-scan-profile kernel patch/new workflow.
+  shim/out/shim-boot-umi-ios-touch-boost.img SHA256
+  399b142720d5f76736225bdc4a866434d42b64d9c7a8c8867766505b80b52cf6.
+  Cross-compile, ABS64 relocation guard, repo validation/diff-check pass;
+  unpacked payload and DTB match generated payload/providedDTB byte-for-byte.
+  Temporary boot initiated from verified TWRP. User must verify actual iOS
+  touch before declaring port fixed; fastboot acceptance alone is insufficient.
+  Original checkout untouched, no partition flashed, no new workflow.
+
 - Photo IMG20261022104726.jpg: BOOST SET=-2 (configuration guard), before
   ANY PMIC write, readback unchanged0100/8080. Not a touch test result.
   Guard fields not displayed previously were subtype/VIN; do not assert

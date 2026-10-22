@@ -110,6 +110,10 @@ static void delay_ms(unsigned ms)
 #if defined(BOARD_UMI) && defined(UMI_TOUCH_PROBE)
 #include "umi_touch_probe.h"
 #endif
+#if defined(BOARD_UMI) && defined(UMI_TOUCH_BOOST)
+#include "umi_touch_mmio.h"
+#include "umi_touch_supply_probe.h"
+#endif
 
 static void __attribute__((noreturn)) reset(unsigned after_s)
 {
@@ -389,6 +393,18 @@ void shim_main(uint64_t dtb)
 	con_clear(RED);
 	con_str("SHIM", "sweet milestone 4: xnu loader");
 	con_skip();
+#if defined(BOARD_UMI) && defined(UMI_TOUCH_BOOST)
+	/* Stock UMI always-on boost. Validated by finger events in the local
+	 * probe; keep VIN1/output-high across XNU handoff. No flash writes. */
+	tp_boost_snapshot();
+	int boost_error = tp_boost_enable_probe();
+	con_hex("BOOST SET", boost_error);
+	tp_boost_snapshot();
+	if (boost_error) {
+		con_str("UMI", "boost setup failed; refusing kernel handoff");
+		reset(20);
+	}
+#endif
 #if defined(BOARD_UMI) && defined(UMI_TOUCH_PROBE)
 	umi_touch_probe();
 #if defined(UMI_BOOST_ENABLE_PROBE)
