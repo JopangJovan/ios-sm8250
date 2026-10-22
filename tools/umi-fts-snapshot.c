@@ -37,6 +37,26 @@ int main(void)
         printf(" %02x",info[i]);
         if(i%16==15)puts("");
     }
+    /* Vendor readSysInfo layout: 0x88 is mutual raw-frame address.
+     * Read the first 32 nodes, without changing scan mode or consuming FIFO. */
+    unsigned raw=info[0x88]|(info[0x89]<<8);
+    if(info[0]!=0xa5 || !raw || raw>0xffc0) {
+        fprintf(stderr,"Invalid raw-frame address %04x\n",raw); close(fd); return 1;
+    }
+    for(unsigned n=0;n<8;n++) {
+        uint8_t framecmd[3]={0xa6,raw>>8,raw}, frame[64];
+        if(read_bytes(fd,framecmd,3,frame,64)) {perror("raw frame");close(fd);return 1;}
+        uint32_t hash=2166136261u;
+        int min=32767,max=-32768;
+        for(unsigned i=0;i<64;i++) hash=(hash^frame[i])*16777619u;
+        for(unsigned i=0;i<64;i+=2) {
+            int v=(int16_t)(frame[i]|(frame[i+1]<<8));
+            if(v<min)min=v;
+            if(v>max)max=v;
+        }
+        printf("raw %04x sample%u hash=%08x min=%d max=%d\n",raw,n,hash,min,max);
+        usleep(250000);
+    }
     close(fd);
     return 0;
 }

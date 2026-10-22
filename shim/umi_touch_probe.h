@@ -138,9 +138,18 @@ static void umi_touch_probe(void)
     if (!err) err = tp_xfer(gestures, 6, NULL, 0);
     con_hex("INIT errno", err);
     if (err) { delay_ms(15000); return; }
-    con_str("TEST", "SWIPE NOW for 60 seconds; then returns to fastboot");
+    uint8_t infocmd[] = {0xa6, 0, 0}, info[208];
+    err = tp_xfer(infocmd, 3, info, sizeof(info));
+    unsigned raw = err ? 0 : info[0x88] | (info[0x89] << 8);
+    if (err || info[0] != 0xa5 || !raw || raw > 0xffc0) {
+        con_str("RAW", "invalid sysinfo; stopping"); delay_ms(15000); return;
+    }
+    con_hex2("CONFIG", "cfg=", info[0x14] | (info[0x15] << 8), "raw=", raw);
+    con_str("TEST", "SWIPE for 30 seconds; observe RAW changes");
     unsigned events = 0, fingers = 0, errors = 0;
-    uint64_t end = now() + rsr("cntfrq_el0") * 60, report = now();
+    unsigned changes = 0, samples = 0;
+    uint32_t previous = 0;
+    uint64_t end = now() + rsr("cntfrq_el0") * 30, report = now(), sample = now();
     while (now() < end) {
         if (!tp_get(39)) {
             err = tp_xfer(&fifo, 1, packet, 8);
@@ -163,9 +172,22 @@ static void umi_touch_probe(void)
                 }
             }
         }
+        if (now() >= sample) {
+            uint8_t framecmd[] = {0xa6, raw >> 8, raw}, frame[64];
+            if (tp_xfer(framecmd, 3, frame, sizeof(frame))) ++errors;
+            else {
+                uint32_t hash = 2166136261u;
+                for (unsigned i = 0; i < sizeof(frame); ++i)
+                    hash = (hash ^ frame[i]) * 16777619u;
+                if (samples && hash != previous) ++changes;
+                previous = hash; ++samples;
+            }
+            sample = now() + rsr("cntfrq_el0") / 4;
+        }
         if (now() >= report) {
             con_hex2("COUNTS", "events=", events, "fingers=", fingers);
             con_hex2("BUS", "errors=", errors, "irq=", tp_get(39));
+            con_hex2("RAW", "hash=", previous, "changes=", changes);
             report = now() + rsr("cntfrq_el0") * 5;
         }
         delay_ms(8);
@@ -173,5 +195,6 @@ static void umi_touch_probe(void)
     con_str("DONE", "Photograph these counters. Rebooting in 15 seconds.");
     con_hex2("FINAL", "events=", events, "fingers=", fingers);
     con_hex("ERRORS", errors);
+    con_hex2("RAW END", "samples=", samples, "changes=", changes);
     delay_ms(15000);
 }

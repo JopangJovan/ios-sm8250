@@ -2,6 +2,20 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Continued local isolation: extended read-only `umi-fts-snapshot.c` with
+  first32 mutual-raw nodes at sysinfo offset0x88 (vendor readSysInfo/getMSFrame3
+  layout), sampled8 times. `logs/twrp-raw-reference.txt`: address8ab0,
+  6/7 adjacent hashes changed, readings approx -134..2013. No scan/flash writes.
+- Added equivalent raw64-byte read/hash to opt-in shim probe, sampled250ms,
+  counter every5s, total30s+15s for final photograph. This distinguishes
+  stationary raw data from missing finger events; not a confirmed fix and
+  live RAM reads are not synchronized whole-frame captures. No new workflow.
+  Image `shim/out/shim-boot-umi-touch-raw.img` SHA256
+  `a89d4d758cbc2afa126db20e72b3ae1785c053643478f7c7b94b64eb0cdeda9e`.
+  Cross-compile, relocation guard, diff-check, repository validation passed.
+  Fastboot product umi, temporary send0.035s/boot0.103s both OKAY.
+  Await user photo; no functional result established yet.
+
 - User photograph IMG20261022095506.jpg confirms pre-XNU probe result:
   VDD errno0, chip3639, init errno0, FINAL events7/fingers0/errors0, IRQ1.
   Same failure exists before XNU/iOS/HID run; those cannot be the sole cause.
