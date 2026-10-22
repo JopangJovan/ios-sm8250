@@ -2,6 +2,33 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Autonomous follow-up: matched live panel_info to Samsung J2 P2.1 38/0c/0a.
+  Vendor DTS explicitly has TSP SYNC B9 separately from display TE 35.
+  `tools/umi-panel-sync-read.sh` sends only documented F0 unlock/relock and
+  reads B9. `logs/twrp-panel-sync-reference.txt`: 00 00 14 18 00 00 00 11 03,
+  exactly matching DTS. Earlier TE observation does not prove TSP SYNC setup.
+- `tools/umi-panel-touch-check.sh` sends standard DCS28 then29, no sleep/reset,
+  trap restores29. Raw samples keep changing during both display-off and-on;
+  `logs/twrp-panel-off-touch-raw.txt`. Emission-off alone does not halt scan.
+- Built opt-in `UMI_PANEL_SYNC_PROBE=1` (requires UMI_TOUCH_PROBE=1), independent
+  `shim/umi_panel_sync_probe.h`. At10s baseline replays only matched vendor
+  F0 unlock/B9 sync/F0 lock via Qualcomm DSI0 TPG FIFO command path; watches
+  raw data afterward. Source refs: dsi_ctrl_hw_cmn_kickoff_fifo_command,
+  drm_mipi_dsi.c packet layout, dsi_ctrl.c LASTCOMMAND; no DMA memory needed.
+  Guard exact HWversion20040000, controller+command enable, idle, unusedTPG;
+  bounded poll and timeout quarantine, no clock/PHY reset or forced enable.
+  Restores command settings after successful completion; on failure resets
+  to fastboot rather than reuse uncertain engine. This is diagnostic only.
+  Panel identity not autodetected by bare-metal code; use ONLY this known phone.
+- `logs/twrp-dsi0-reference.txt` confirms HW20040000. Idle Linux dump CTRL0
+  (likely runtime gated, not proven); pre-XNU may likewise reject guard.
+  Must distinguish guard rejection/transfer timeout from tested sync failure.
+  No new XNU workflow; cross-compile/relocation guard/repo validation pass.
+- Image `shim/out/shim-boot-umi-touch-panel-sync.img`, SHA256
+  `1f4e1110b20158963ef1fb53777d868aaf6fcbf72502f5297c7114d76b71daed`.
+  Fastboot product umi, send0.039s/boot0.096s both OKAY. Human photo of DSI0,
+  SYNC ERR and RAW END required next; no functional result yet.
+
 - Target reconnected in TWRP, serial f40df34d verified. New read-only
   reference `logs/twrp-raw-reconnected.txt` reproduces changing raw hashes.
 - Added explicit `--scan-cycle` recovery snapshot option, wrapped in vendor

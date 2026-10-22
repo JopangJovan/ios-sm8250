@@ -107,6 +107,9 @@ static int tp_xfer(const uint8_t *tx, unsigned nt, uint8_t *rx, unsigned nr)
     tp_stop();
     return err;
 }
+#if defined(UMI_PANEL_SYNC_PROBE)
+#include "umi_panel_sync_probe.h"
+#endif
 static void umi_touch_probe(void)
 {
     con_clear(BLUE);
@@ -150,7 +153,22 @@ static void umi_touch_probe(void)
     unsigned changes = 0, samples = 0;
     uint32_t previous = 0;
     uint64_t end = now() + rsr("cntfrq_el0") * 30, report = now(), sample = now();
+#if defined(UMI_PANEL_SYNC_PROBE)
+    uint64_t sync_at = now() + rsr("cntfrq_el0") * 10;
+    bool sync_done = false;
+#endif
     while (now() < end) {
+#if defined(UMI_PANEL_SYNC_PROBE)
+        if (!sync_done && now() >= sync_at) {
+            con_hex2("BEFORE", "samples=", samples, "changes=", changes);
+            int syncerr = tp_panel_sync();
+            con_hex("SYNC ERR", syncerr);
+            if (syncerr) { delay_ms(15000); return; }
+            con_str("AFTER", "TSP SYNC replayed; swipe now");
+            sync_done = true;
+            changes = samples = 0;
+        }
+#endif
         if (!tp_get(39)) {
             err = tp_xfer(&fifo, 1, packet, 8);
             if (err) ++errors;

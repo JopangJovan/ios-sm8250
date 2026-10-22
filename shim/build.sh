@@ -32,6 +32,12 @@ case "${UMI_TOUCH_PROBE:-0}" in
     *) echo 'UMI_TOUCH_PROBE must be 0 or 1' >&2; exit 1 ;;
 esac
 mkdir -p out
+case "${UMI_PANEL_SYNC_PROBE:-0}" in
+    0) ;;
+    1) [ "${UMI_TOUCH_PROBE:-0}" = 1 ] || { echo 'panel sync probe requires touch probe' >&2; exit 1; }
+       CFLAGS="$CFLAGS -DUMI_PANEL_SYNC_PROBE" ;;
+    *) echo 'UMI_PANEL_SYNC_PROBE must be 0 or 1' >&2; exit 1 ;;
+esac
 for f in start.S shim.c console.c mmu.c fdt.c loader.c ufs.c; do
 	$CC $CFLAGS -c $f -o out/${f%.*}.o
 done
