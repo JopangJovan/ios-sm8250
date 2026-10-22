@@ -2,6 +2,17 @@
 
 ## Touch failure and CI optimization follow-up
 
+- User photo IMG20261022100320.jpg: raw probe config004F/raw8ab0,
+  events7/fingers0/errors0; RAW END samples0x71=113, changes0;
+  fixed hash935025C5. Unlike working recovery reference, sampled raw region
+  never changes. This supports investigating scan/startup or raw-buffer
+  publication; it does NOT alone prove analog scan is stopped (unsynchronized
+  raw buffer may have other update conditions). Not a HID-only failure.
+- Follow-up connection check: target f40df34d absent from adb and fastboot.
+  Another adb serial is present; do not operate on that unrelated device.
+  User says target is TWRP. Need target USB reconnection before live comparison.
+  No new boot, workflow, flashing, or controller writes this turn.
+
 - Continued local isolation: extended read-only `umi-fts-snapshot.c` with
   first32 mutual-raw nodes at sysinfo offset0x88 (vendor readSysInfo/getMSFrame3
   layout), sampled8 times. `logs/twrp-raw-reference.txt`: address8ab0,
