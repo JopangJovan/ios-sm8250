@@ -2,6 +2,23 @@
 
 ## Touch failure and CI optimization follow-up
 
+- User photograph IMG20261022095506.jpg confirms pre-XNU probe result:
+  VDD errno0, chip3639, init errno0, FINAL events7/fingers0/errors0, IRQ1.
+  Same failure exists before XNU/iOS/HID run; those cannot be the sole cause.
+  Transport ACK success does not establish analog sensing or rail voltage.
+  Device returned to TWRP, adb verified. No further boot or workflow issued.
+- Saved full current recovery dmesg `logs/twrp-after-shim-probe-dmesg.txt`.
+  Cold recovery startup logs: config004F, CXFFFF, AFE08/08/08; firmware
+  updater explicitly SKIPS burning (installed version equal). Thus working
+  recovery is not explained by a firmware flash on this boot. It performs
+  multiple resets/lockdown reads then mode-handler, forces calibration twice.
+  Read-only live snapshot still matches previous register/sysinfo reference.
+  DT and pinctrl reconfirm SOUTH GPIO69 supply switch and pm8150a_l1 1.8V;
+  no newly identified missing regulator. Cause remains unresolved.
+  Next useful comparison: cold-start platform/reset/calibration behavior,
+  not another HID patch or speculative CI build. Linux F0 replay starts
+  inside an already initialized platform and is not a true cold-boot replica.
+
 - 2026-10-22 follow-up: user reports cold-start still fails, device TWRP.
   `logs/clean-touch-coldstart-failed.txt`: chip3639/init succeeds, expected
   7 events, no fingers, errors0, panel TE edges present. Cold AVDD/reset
