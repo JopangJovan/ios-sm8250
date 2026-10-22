@@ -2,6 +2,15 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Captured vendor init test failed: `logs/clean-touch-vendor-trace-failed.txt`
+  confirms all 7 expected responses, no transfer errors and no finger events.
+- Recovery still uses Geni-I2C with working touch. GPIO66 is input mux1 high
+  in recovery, per debugfs; pinctrl-kona maps it to NORTH + 66*0x1000.
+- New 0090 gates post-init FIFO reads on IRQ low, matching recovery behavior,
+  and samples panel TE read-only at 0x0f942004 for 40ms every ~5s. This tests
+  polling interference and display-sync availability; neither is established
+  as the cause. No display register writes or firmware programming added.
+
 - 2026-10-22: run `39618782680` / `9b17673` succeeded; artifact
   `12353373995` downloaded to `xnu/out-touch-vendor-trace`, SHA256SUMS passed.
   Repacked umifts_scan=1 and temporarily booted from TWRP. Image

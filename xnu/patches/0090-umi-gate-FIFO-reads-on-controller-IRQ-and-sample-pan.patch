@@ -1,0 +1,52 @@
+From f4fec15b1d5e05d946429f7011d349442c9da6f0 Mon Sep 17 00:00:00 2001
+From: Codex <codex@localhost>
+Date: Thu, 22 Oct 2026 09:17:22 +0700
+Subject: [PATCH] umi: gate FIFO reads on controller IRQ and sample panel TE
+
+---
+ bsd/dev/sweet_touch.c | 21 ++++++++++++++++++++-
+ 1 file changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
+index 96f3d20..e5b08e4 100644
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -849,8 +849,14 @@ umi_touch_run(void)
+ 		return;
+ 	}
+ 	unsigned ticks = 0, events = 0, errors = 0;
++	/* Panel TE is GPIO66 in TLMM NORTH, unlike the SOUTH touch pins.
++	 * Read only; do not remux or drive this display-owned signal. */
++	vm_offset_t te = ml_io_map(0x0f942000u, 0x1000u);
+ 	while (!st.dead) {
+-		if (!umi_fts_fifo(event)) {
++		/* Match the working recovery IRQ path: leave an empty FIFO alone. */
++		if (touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_IRQ)) & 1u) {
++			/* no pending controller interrupt */
++		} else if (!umi_fts_fifo(event)) {
+ 			unsigned count = event[7] & 0x1fu;
+ 			if (event[0]) {
+ 				++events;
+@@ -876,6 +882,19 @@ umi_touch_run(void)
+ 			printf("UMI FTS: poll=%u events=%u errors=%u irq=%u active=%#x\n",
+ 			    ticks, events, errors,
+ 			    touch_rd(st.gpio, TOUCH_GPIO_IO(TOUCH_GPIO_IRQ)) & 1u, st.active);
++			if (te) {
++				unsigned edges = 0, high = 0;
++				uint32_t last = touch_rd(te, 4) & 1u;
++				for (unsigned i = 0; i < 2000; ++i) {
++					uint32_t value = touch_rd(te, 4) & 1u;
++					edges += value != last;
++					high += value;
++					last = value;
++					delay(20);
++				}
++				printf("UMI FTS: display TE cfg=%#x edges=%u high=%u/2000\n",
++				    touch_rd(te, 0), edges, high);
++			}
+ 		}
+ 		touch_wait(8);
+ 	}
+-- 
+2.56.0
+
