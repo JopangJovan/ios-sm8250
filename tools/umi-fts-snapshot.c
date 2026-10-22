@@ -1,9 +1,11 @@
-/* Read-only FTS521 register snapshot through recovery's I2C_RDWR interface.
- * No reset, firmware update, scan-mode change, or register-data write. */
+/* FTS521 snapshot through recovery's I2C_RDWR interface: read-only by default.
+ * --scan-cycle temporarily changes scan mode; caller MUST wrap with F0/F1.
+ * No firmware, persistent calibration, or flash writes in either mode. */
 #include <stdint.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
@@ -18,8 +20,12 @@ static int read_bytes(int fd, uint8_t *cmd, unsigned nc, uint8_t *buf, unsigned 
     return ioctl(fd, I2C_RDWR, &xfer) == 2 ? 0 : -1;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    int cycle = argc == 2 && !strcmp(argv[1], "--scan-cycle");
+    if (argc != 1 && !cycle) {
+        fprintf(stderr,"Usage: %s [--scan-cycle]\n",argv[0]); return 1;
+    }
     int fd = open("/dev/i2c-3", O_RDWR);
     if (fd < 0) { perror("open"); return 1; }
     const uint32_t regs[] = {0x20000000,0x20000004,0x20000024,0x20000025,
@@ -43,7 +49,17 @@ int main(void)
     if(info[0]!=0xa5 || !raw || raw>0xffc0) {
         fprintf(stderr,"Invalid raw-frame address %04x\n",raw); close(fd); return 1;
     }
-    for(unsigned n=0;n<8;n++) {
+    /* Opt-in controlled experiment: caller MUST disable host IRQ using F0
+     * and restore F1 afterward even on failure. Default remains read-only.
+     * Only scan OFF/ON; no persistent calibration or flash commands. */
+    for(unsigned n=0;n<(cycle?16u:8u);n++) {
+        if(cycle && (n==0 || n==8)) {
+            uint8_t scan[3]={0xa0,0,n==8?1:0};
+            struct i2c_msg msg={.addr=0x49,.len=3,.buf=scan};
+            struct i2c_rdwr_ioctl_data x={.msgs=&msg,.nmsgs=1};
+            if(ioctl(fd,I2C_RDWR,&x)!=1) {perror("scan change; restore F1!");close(fd);return 1;}
+            printf("SCAN %s\n",n==8?"ON":"OFF"); usleep(250000);
+        }
         uint8_t framecmd[3]={0xa6,raw>>8,raw}, frame[64];
         if(read_bytes(fd,framecmd,3,frame,64)) {perror("raw frame");close(fd);return 1;}
         uint32_t hash=2166136261u;

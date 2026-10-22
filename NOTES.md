@@ -2,6 +2,18 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Target reconnected in TWRP, serial f40df34d verified. New read-only
+  reference `logs/twrp-raw-reconnected.txt` reproduces changing raw hashes.
+- Added explicit `--scan-cycle` recovery snapshot option, wrapped in vendor
+  F0/F1 with unconditional F1 restoration after tool exit. Sends only known
+  A0 00 00 (off), A0 00 01 (on), 250ms settling. No flash/calibration writes.
+  `logs/twrp-raw-scan-cycle.txt`: all8 off samples same ec59a73d; all8 on
+  hashes differ. F1 returned {00000000}. This validates the sampled RAM
+  region as responsive to scan state in working recovery, strengthening the
+  pre-XNU startup/scan investigation, not proving a particular root cause.
+  Recovery CONFIG_KEXEC/DEVMEM unset; cannot retain platform state via kexec
+  or test direct MMIO using /dev/mem. No reboot or workflow dispatched.
+
 - User photo IMG20261022100320.jpg: raw probe config004F/raw8ab0,
   events7/fingers0/errors0; RAW END samples0x71=113, changes0;
   fixed hash935025C5. Unlike working recovery reference, sampled raw region
