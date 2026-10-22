@@ -2,6 +2,12 @@
 
 ## Touch failure and CI optimization follow-up
 
+- IRQ/TE test run `39710577692` / `96028b4` passed; artifact `12396707756`
+  saved to `xnu/out-touch-irq-te`, SHA256SUMS verified. Repacked scan=1;
+  temporarily booted image `shim/out/shim-boot-umi-touch-irq-te.img`, hash
+  `a05a893081906d9294d05013a00f12907dbffc288b2d659544a8c157cbd6fad3`.
+  Await user result and recovery log with display TE edges/high samples.
+
 - Captured vendor init test failed: `logs/clean-touch-vendor-trace-failed.txt`
   confirms all 7 expected responses, no transfer errors and no finger events.
 - Recovery still uses Geni-I2C with working touch. GPIO66 is input mux1 high
