@@ -134,14 +134,33 @@ static void umi_touch_probe(void)
     for (unsigned i = 0; i < 32; ++i) {
         if (tp_xfer(&fifo, 1, packet, 8) || !packet[0]) break;
     }
-    uint8_t scan[] = {0xa0, 0, 1}, feature[] = {0xa2, 0, 0};
+    uint8_t scan[] = {0xa0, 0, 1};
     uint8_t gestures[] = {0xa2, 3, 0, 0, 0, 3};
     err = tp_xfer(scan, 3, NULL, 0);
+#if defined(UMI_FTS_COLD_REPLAY)
+    /* Real cold-probe trace, unlike stm_fts_cmd F1: fts_init_sensing()
+     * CONFIG_TOUCHSCREEN_FOD stops scan for WAIT_AFTER_SENSEOFF (50ms).
+     * C1 05 is fts_read_touchmode_data(), read-only, not a calibration write. */
+    con_str("PROFILE", "captured TWRP cold init (50ms scan off)");
+    if (!err) err = tp_xfer(gestures, 6, NULL, 0);
+    scan[2] = 0;
+    if (!err) err = tp_xfer(scan, 3, NULL, 0);
+    delay_ms(53);
+    scan[2] = 1;
+    if (!err) err = tp_xfer(scan, 3, NULL, 0);
+    uint8_t modecmd[] = {0xc1, 5}, mode[7] = {0};
+    if (!err) err = tp_xfer(modecmd, 2, mode, 7);
+    if (!err) con_hex2("MODE", "first4=", ((uint32_t)mode[0]<<24) |
+        ((uint32_t)mode[1]<<16) | ((uint32_t)mode[2]<<8) | mode[3],
+        "last3=", ((uint32_t)mode[4]<<16) | ((uint32_t)mode[5]<<8) | mode[6]);
+#else
+    uint8_t feature[] = {0xa2, 0, 0};
     for (unsigned i = 0; !err && i < 3; ++i) {
         feature[1] = i; err = tp_xfer(feature, 3, NULL, 0);
     }
     if (!err) err = tp_xfer(scan, 3, NULL, 0);
     if (!err) err = tp_xfer(gestures, 6, NULL, 0);
+#endif
     con_hex("INIT errno", err);
     if (err) { delay_ms(15000); return; }
     uint8_t infocmd[] = {0xa6, 0, 0}, info[208];

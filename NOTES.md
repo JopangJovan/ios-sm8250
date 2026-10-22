@@ -2,6 +2,36 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Recovery reconnected. Added --reset-scan-cycle to snapshot tool: known
+  FA2000002480 soft reset, drains fresh ready03, raw reads before scan then
+  A00001. `logs/twrp-reset-raw-reference.txt`: old noisy raw buffer retained
+  while scan off; changing raw data resumes after scan ON. F0/F1 restore0.
+  Warm reset therefore does not replicate cold powered-up RAM contents.
+- Captured TRUE recovery boot I2C locally, without rebuilding kernel/ramdisk:
+  read existing recovery partition into ignored work/recovery-trace; new
+  tools/umi-recovery-trace.py modifies ONLY header cmdline fields, checks
+  every other byte unchanged. Adds trace_event=i2c:* trace_buf_size=8192K
+  trace_clock=global. Original image hashbb7b0995b6bb69a8059f7b845d8e3d06c2ad6ddadb1c38c454488031c8508df9,
+  tracing image hashafde8b58b085a1690c889bf5c62ebe718ee424dfe42aa1116aeb9d5c0e64c842.
+  Temporary fastboot boot productumi/send3.340s/boot0.097s OKAY, recovery adb
+  returned. Stopped tracing and disabled I2C events after capture.
+  logs/twrp-cold-boot-i2c.txt (14834 lines), twrp-cold-boot-trace-dmesg.txt.
+  logs/twrp-trace-boot-raw.txt confirms scan still produces changing raw data.
+- Cold trace differs from F1: after last reset03, A00001, A20300000003,
+  A00000, ~53ms pause, A00001; C105 combined-read7 returns0000500f020e01;
+  charger feature A20201 follows ~0.5s later. C105 is read-only touchmode
+  status (fts_read_touchmode_data), NOT calibration/firmware command.
+  fts_init_sensing CONFIG_TOUCHSCREEN_FOD explicitly implements50ms senseoff.
+- Added opt-in UMI_FTS_COLD_REPLAY=1 local shim scan-start profile reflecting
+  that captured cold scan/gesture/timing + read-only C105, instead of F1's
+  forced feature restore. This changes scan-start profile only, not entire
+  cold power/three-reset/lockdown sequence. No causal claim until tested.
+  Image shim/out/shim-boot-umi-touch-cold-trace.img SHA256
+  c29f416ce0f451c94d85feb4798f485ee53111a5985311039f75b977213164d1.
+  Cross-compile/relocation guard/repo validation pass. Temporary boot initiated;
+  human photo of PROFILE/MODE/RAW END/finger counts required next.
+  No XNU workflow, flash, or original checkout modification.
+
 - Photo IMG20261022102438.jpg supply probe: L1 PRIOR errno0/set0708=1800mV,
   mode/en0700 (disabled), status03. AFTER errno0/set0708/mode-en0780
   (enabled), status87. Thus RPMh vote changes actual PMIC programmed enable,

@@ -23,11 +23,27 @@ static int read_bytes(int fd, uint8_t *cmd, unsigned nc, uint8_t *buf, unsigned 
 int main(int argc, char **argv)
 {
     int cycle = argc == 2 && !strcmp(argv[1], "--scan-cycle");
-    if (argc != 1 && !cycle) {
-        fprintf(stderr,"Usage: %s [--scan-cycle]\n",argv[0]); return 1;
+    int reset_cycle = argc == 2 && !strcmp(argv[1], "--reset-scan-cycle");
+    if (argc != 1 && !cycle && !reset_cycle) {
+        fprintf(stderr,"Usage: %s [--scan-cycle|--reset-scan-cycle]\n",argv[0]); return 1;
     }
     int fd = open("/dev/i2c-3", O_RDWR);
     if (fd < 0) { perror("open"); return 1; }
+    if(reset_cycle) {
+        /* Documented vendor fallback reset, not firmware/flash programming.
+         * Caller wraps F0/F1; all subsequent reads occur with host IRQ off. */
+        uint8_t reset[]={0xfa,0x20,0,0,0x24,0x80};
+        struct i2c_msg msg={.addr=0x49,.len=sizeof(reset),.buf=reset};
+        struct i2c_rdwr_ioctl_data x={.msgs=&msg,.nmsgs=1};
+        if(ioctl(fd,I2C_RDWR,&x)!=1) {perror("reset; restore F1!");close(fd);return 1;}
+        usleep(150000);
+        for(unsigned i=0;i<32;i++) {
+            uint8_t fifo=0x86,event[8];
+            if(read_bytes(fd,&fifo,1,event,8)) {perror("reset FIFO");close(fd);return 1;}
+            printf("reset evt %02x %02x %02x\n",event[0],event[1],event[2]);
+            if(!event[0] || !(event[7]&31))break;
+        }
+    }
     const uint32_t regs[] = {0x20000000,0x20000004,0x20000024,0x20000025,
         0x20000029,0x2000002d,0x20000030,0x20000032,0x20000034,0x20000078};
     for (unsigned i=0; i<sizeof(regs)/sizeof(regs[0]); ++i) {
@@ -52,8 +68,8 @@ int main(int argc, char **argv)
     /* Opt-in controlled experiment: caller MUST disable host IRQ using F0
      * and restore F1 afterward even on failure. Default remains read-only.
      * Only scan OFF/ON; no persistent calibration or flash commands. */
-    for(unsigned n=0;n<(cycle?16u:8u);n++) {
-        if(cycle && (n==0 || n==8)) {
+    for(unsigned n=0;n<((cycle||reset_cycle)?16u:8u);n++) {
+        if((cycle && n==0) || ((cycle||reset_cycle) && n==8)) {
             uint8_t scan[3]={0xa0,0,n==8?1:0};
             struct i2c_msg msg={.addr=0x49,.len=3,.buf=scan};
             struct i2c_rdwr_ioctl_data x={.msgs=&msg,.nmsgs=1};
