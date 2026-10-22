@@ -2,6 +2,14 @@
 
 ## Touch failure and CI optimization follow-up
 
+- 2026-10-22: run `39618782680` / `9b17673` succeeded; artifact
+  `12353373995` downloaded to `xnu/out-touch-vendor-trace`, SHA256SUMS passed.
+  Repacked umifts_scan=1 and temporarily booted from TWRP. Image
+  `shim/out/shim-boot-umi-touch-vendor-trace.img` SHA-256
+  `0382171cc930537c042a7248f9a6f04aed3fe62049d7b1f12c65a4d814eb9b2e`.
+  This tests the actual recovery F1 feature restoration sequence and FIFO
+  batching. Functional result awaits user touch test.
+
 - IER test failed; `logs/clean-touch-ier-failed.txt`: IER02 before scan,
   IER42 after queued echoes. No write was needed before scan, and no finger
   events appeared. Bit40 may be status-dependent; no causal meaning proven.
