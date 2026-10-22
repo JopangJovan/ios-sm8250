@@ -2,6 +2,24 @@
 
 ## Touch failure and CI optimization follow-up
 
+- User asks to avoid time-consuming speculative workflows. No new workflow
+  dispatched in this turn. IRQ/TE image failed; saved
+  `logs/clean-touch-irq-te-failed.txt`: init7 events, no fingers, zero I2C
+  errors, display TE7-11 edges/40ms. Absent TE and continuous empty-FIFO
+  polling are not supported explanations for this failure.
+- New locally compiled recovery tool `tools/umi-fts-replay.c` sends the
+  exact clean XNU command sequence over Linux native I2C and polls FIFO with
+  vendor host IRQ temporarily disabled using F0. User swiped. Result:
+  events2937, finger_events2901, empty2698. F1 restored vendor IRQ/driver and
+  returned {00000000}. No firmware or flash writes. This confirms the
+  sequence and FIFO decoding work in the Linux hardware environment.
+- GPIO-character-device open-drain test verified chip label f000000.pinctrl,
+  180 lines and GPIO36/37 idle1/1. Failed first command A0 transfer, then
+  released GPIO handles and restored F1 successfully. Linux GPIO ioctl
+  transport is NOT identical to XNU direct TLMM access: result is a useful
+  transport discrepancy, not proof of XNU fault. Next work should validate
+  transport/platform behavior locally before another full workflow.
+
 - IRQ/TE test run `39710577692` / `96028b4` passed; artifact `12396707756`
   saved to `xnu/out-touch-irq-te`, SHA256SUMS verified. Repacked scan=1;
   temporarily booted image `shim/out/shim-boot-umi-touch-irq-te.img`, hash
