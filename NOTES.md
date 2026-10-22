@@ -2,6 +2,18 @@
 
 ## Touch failure and CI optimization follow-up
 
+- Photo IMG20261022102438.jpg supply probe: L1 PRIOR errno0/set0708=1800mV,
+  mode/en0700 (disabled), status03. AFTER errno0/set0708/mode-en0780
+  (enabled), status87. Thus RPMh vote changes actual PMIC programmed enable,
+  not merely an accepted request; no electrical voltage measurement made.
+  Raw32 nodes ALL C262 (-15774), min=max, hash935025C5; sample0x71=113,
+  changes0/events7/fingers0/errors0. This is a uniform data pattern rather
+  than a frozen normal-looking noisy frame. Source search finds no documented
+  C262 sentinel in vendor driver; meaning unproven. Don't invent interpretation.
+- Post-photo target is absent from BOTH adb and fastboot, so further live
+  TWRP reset/startup comparison requires human reconnection/recovery entry.
+  No new image boot, workflow or device writes performed after this result.
+
 - Photo IMG20261022101950.jpg: DSIversion20040000/CTRL1f5, all3 DSI TX
   errno0/status503; SYNC ERR0. After TSP replay, events7/fingers0/errors0,
   RAW hash935025C5/changes0. Vendor sync replay did NOT restore scan data.
